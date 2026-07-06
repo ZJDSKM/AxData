@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <a href="https://electkismet.github.io/AxData/"><strong>在线文档 / 接口文档</strong></a>
+  <a href="https://electkismet.github.io/AxData/"><strong>在线文档</strong></a>
   ·
   <a href="https://electkismet.github.io/AxData/interfaces/">接口一览</a>
   ·
