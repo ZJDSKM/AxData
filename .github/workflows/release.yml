@@ -130,7 +130,7 @@ jobs:
     needs: build
     if: github.event_name == 'release' || inputs.publish == true
     environment:
-      name: pypi
+      name: pypi-axdata-core
       url: https://pypi.org/project/axdata-core/
     permissions:
       contents: read
@@ -157,13 +157,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package:
-          - axdata-source-tdx
-          - axdata-source-tdx-ext
-          - axdata-source-tencent
-          - axdata-source-cninfo
+        include:
+          - package: axdata-source-tdx
+            environment: pypi-axdata-source-tdx
+          - package: axdata-source-tdx-ext
+            environment: pypi-axdata-source-tdx-ext
+          - package: axdata-source-tencent
+            environment: pypi-axdata-source-tencent
+          - package: axdata-source-cninfo
+            environment: pypi-axdata-source-cninfo
     environment:
-      name: pypi
+      name: ${{ matrix.environment }}
       url: https://pypi.org/project/${{ matrix.package }}/
     permissions:
       contents: read
@@ -188,7 +192,7 @@ jobs:
     needs: publish-source-providers
     if: github.event_name == 'release' || inputs.publish == true
     environment:
-      name: pypi
+      name: pypi-axdata
       url: https://pypi.org/project/axdata/
     permissions:
       contents: read

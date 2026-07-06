@@ -76,18 +76,20 @@ $work = "$env:TEMP\axdata-pypi-readiness"
 
 ### 首次发布前的 PyPI 设置
 
-当前 workflow 使用 PyPI Trusted Publishing，不需要在 GitHub 仓库里保存 PyPI token。首次发布前，需要在 PyPI 为以下项目配置 Trusted Publisher：
+当前 workflow 使用 PyPI Trusted Publishing，不需要在 GitHub 仓库里保存 PyPI token。首次发布前，需要在 PyPI 为以下项目配置 Trusted Publisher。
+
+如果项目还没有在 PyPI 创建，使用 PyPI 的 `Add a new pending publisher`。Pending publisher 不会提前占住包名，第一次真实发布成功后才会创建项目。
 
 | PyPI 项目 | GitHub owner | GitHub repo | Workflow | Environment |
 | --- | --- | --- | --- | --- |
-| `axdata-core` | `electkismet` | `AxData` | `release.yml` | `pypi` |
-| `axdata-source-tdx` | `electkismet` | `AxData` | `release.yml` | `pypi` |
-| `axdata-source-tdx-ext` | `electkismet` | `AxData` | `release.yml` | `pypi` |
-| `axdata-source-tencent` | `electkismet` | `AxData` | `release.yml` | `pypi` |
-| `axdata-source-cninfo` | `electkismet` | `AxData` | `release.yml` | `pypi` |
-| `axdata` | `electkismet` | `AxData` | `release.yml` | `pypi` |
+| `axdata-core` | `electkismet` | `AxData` | `release.yml` | `pypi-axdata-core` |
+| `axdata-source-tdx` | `electkismet` | `AxData` | `release.yml` | `pypi-axdata-source-tdx` |
+| `axdata-source-tdx-ext` | `electkismet` | `AxData` | `release.yml` | `pypi-axdata-source-tdx-ext` |
+| `axdata-source-tencent` | `electkismet` | `AxData` | `release.yml` | `pypi-axdata-source-tencent` |
+| `axdata-source-cninfo` | `electkismet` | `AxData` | `release.yml` | `pypi-axdata-source-cninfo` |
+| `axdata` | `electkismet` | `AxData` | `release.yml` | `pypi-axdata` |
 
-如果这些 PyPI 项目还没有创建，需要在 PyPI 创建对应项目或配置 pending publisher；最终以 PyPI 后台可用选项为准。
+PyPI 的 pending publisher 不允许多个未创建项目共用完全相同的 owner、repo、workflow 和 environment，因此每个包使用独立的 environment 名称。
 
 ### 发布前检查
 
