@@ -21,6 +21,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "site"
+PYPI_URL = "https://pypi.org/project/axdata/"
 PUBLIC_SOURCE_PROVIDER_IDS = (
     "axdata.source.tdx_external",
     "axdata.source.tdx_ext_external",
@@ -101,7 +102,7 @@ def build_site(output_dir: str | Path = DEFAULT_OUTPUT_DIR) -> dict[str, Any]:
     for entry in prepared_entries:
         write_text(
             output_path / "interfaces" / f"{entry['slug']}.html",
-            render_interface_detail(entry, generated_at),
+            render_interface_detail(entry, generated_at, prepared_entries),
         )
 
     rendered_docs = render_doc_pages(output_path)
@@ -308,9 +309,9 @@ def render_interface_index(entries: Sequence[Mapping[str, Any]], generated_at: s
         render_interface_index_row(entry)
         for entry in entries
     )
-    body = f"""
+    content = f"""
 <section class="page-head">
-  <p class="eyebrow">Interface Catalog</p>
+  <p class="eyebrow">接口目录</p>
   <h1>接口文档</h1>
   <p class="lead">共 {len(entries)} 个 source_request 接口。所有详情页来自插件接口目录和固定 example 快照。</p>
 </section>
@@ -361,7 +362,52 @@ searchInput.addEventListener("input", applyFilters);
 sourceFilter.addEventListener("change", applyFilters);
 </script>
 """
+    body = app_shell(interface_sidebar(entries), content)
     return page("接口文档 - AxData", body, active="interfaces")
+
+
+def app_shell(sidebar: str, content: str) -> str:
+    return f"""
+<div class="app-shell">
+  <aside class="app-sidebar">{sidebar}</aside>
+  <div class="app-content">{content}</div>
+</div>
+"""
+
+
+def interface_sidebar(entries: Sequence[Mapping[str, Any]], active_slug: str | None = None) -> str:
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for entry in entries:
+        grouped.setdefault(str(entry["source_name_zh"]), []).append(entry)
+    sections: list[str] = [
+        f"""
+<div class="sidebar-head">
+  <div>
+    <p>接口目录</p>
+    <strong>全部接口</strong>
+  </div>
+  <span>{len(entries)}</span>
+</div>
+<a class="sidebar-link {'active' if active_slug is None else ''}" href="index.html">接口一览</a>
+"""
+    ]
+    for source, source_entries in sorted(grouped.items(), key=lambda item: source_sort_key(item[0])):
+        links = "".join(
+            f"<a class=\"sidebar-link {'active' if entry['slug'] == active_slug else ''}\" href=\"{escape(str(entry['slug']))}.html\">{escape(str(entry['title']))}</a>"
+            for entry in source_entries[:12]
+        )
+        more = ""
+        if len(source_entries) > 12:
+            more = f"<span class=\"sidebar-more\">还有 {len(source_entries) - 12} 个接口，可在接口一览搜索</span>"
+        sections.append(
+            f"""
+<details class="sidebar-group" open>
+  <summary><span>{escape(source)}</span><em>{len(source_entries)}</em></summary>
+  <div>{links}{more}</div>
+</details>
+"""
+        )
+    return "\n".join(sections)
 
 
 def render_interface_index_row(entry: Mapping[str, Any]) -> str:
@@ -388,7 +434,11 @@ def render_interface_index_row(entry: Mapping[str, Any]) -> str:
 </tr>"""
 
 
-def render_interface_detail(entry: Mapping[str, Any], generated_at: str) -> str:
+def render_interface_detail(
+    entry: Mapping[str, Any],
+    generated_at: str,
+    entries: Sequence[Mapping[str, Any]],
+) -> str:
     request = entry["example"]["request"]
     response = entry["example"]["response"]
     meta = [
@@ -400,7 +450,7 @@ def render_interface_detail(entry: Mapping[str, Any], generated_at: str) -> str:
         ("请求模式", entry.get("request_mode") or "source_request"),
         ("采集支持", collection_label(entry.get("collection"))),
     ]
-    body = f"""
+    content = f"""
 <section class="page-head">
   <p class="breadcrumb"><a href="index.html">接口文档</a> / {escape(str(entry['source_name_zh']))}</p>
   <h1>{escape(str(entry['title']))}</h1>
@@ -439,6 +489,7 @@ def render_interface_detail(entry: Mapping[str, Any], generated_at: str) -> str:
 {reference_sections(entry.get("reference_sections") or [])}
 <p class="build-note">生成时间：{escape(generated_at)}</p>
 """
+    body = app_shell(interface_sidebar(entries, active_slug=str(entry["slug"])), content)
     return page(f"{entry['title']} - AxData 接口文档", body, active="interfaces")
 
 
@@ -633,6 +684,7 @@ def page(title: str, body: str, *, active: str) -> str:
         ("home", "首页", root_link(active, "index.html")),
         ("interfaces", "接口文档", root_link(active, "interfaces/index.html")),
         ("docs", "开发文档", root_link(active, "docs/index.html")),
+        ("pypi", "PyPI", PYPI_URL),
     )
     nav = "".join(
         f"<a class=\"{'active' if key == active else ''}\" href=\"{escape(href)}\">{escape(label)}</a>"
@@ -649,11 +701,11 @@ def page(title: str, body: str, *, active: str) -> str:
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="{escape(root_link(active, 'index.html'))}">AxData</a>
+    <a class="brand" href="{escape(root_link(active, 'index.html'))}"><span class="brand-mark"></span><span>AxData</span></a>
     <nav>{nav}</nav>
   </header>
   <main>{body}</main>
-  <footer>AxData is an open-source quantitative database framework for personal learning, protocol research and non-commercial research.</footer>
+  <footer>AxData 是一个开源量化数据库框架，主要面向个人学习、技术研究和本地数据管理。</footer>
 </body>
 </html>
 """
@@ -847,15 +899,16 @@ def site_css() -> str:
     return """
 :root {
   color-scheme: light;
-  --bg: #f8fafc;
+  --bg: #f6f8fb;
   --surface: #ffffff;
-  --surface-strong: #eef4f8;
-  --text: #18212f;
-  --muted: #607086;
-  --line: #d9e2ea;
-  --accent: #146c94;
-  --accent-strong: #0f4f6d;
-  --accent-soft: #dff1f7;
+  --surface-strong: #f8fafc;
+  --text: #172033;
+  --muted: #64748b;
+  --line: #dde6f0;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #eaf2ff;
+  --sidebar: #fbfdff;
   --ok: #2f7d5c;
   --warn: #a56218;
 }
@@ -872,12 +925,13 @@ a:hover { color: var(--accent-strong); text-decoration: underline; }
 .site-header {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 14px clamp(18px, 4vw, 48px);
+  gap: 18px;
+  min-height: 60px;
+  padding: 0 clamp(16px, 3vw, 32px);
   background: rgba(255,255,255,.94);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(12px);
@@ -885,15 +939,28 @@ a:hover { color: var(--accent-strong); text-decoration: underline; }
 .brand {
   color: var(--text);
   font-weight: 800;
-  font-size: 20px;
+  font-size: 18px;
   letter-spacing: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
-nav { display: flex; gap: 10px; flex-wrap: wrap; }
+.brand:hover { text-decoration: none; }
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-block;
+  background: linear-gradient(180deg, #3b82f6, #2563eb);
+  box-shadow: inset 0 0 0 5px #dbeafe;
+}
+nav { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 nav a {
   color: var(--muted);
-  padding: 6px 10px;
+  padding: 6px 12px;
   border-radius: 6px;
   font-size: 14px;
+  font-weight: 650;
 }
 nav a.active, nav a:hover {
   background: var(--accent-soft);
@@ -901,9 +968,9 @@ nav a.active, nav a:hover {
   text-decoration: none;
 }
 main {
-  width: min(1180px, calc(100vw - 32px));
+  width: min(1380px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 34px 0 56px;
+  padding: 26px 0 56px;
 }
 section {
   margin: 0 0 28px;
@@ -924,7 +991,10 @@ h1, h2, h3 {
 }
 h1 {
   margin: 0 0 14px;
-  font-size: clamp(34px, 5vw, 58px);
+  font-size: clamp(32px, 5vw, 56px);
+}
+.app-content h1 {
+  font-size: clamp(34px, 4vw, 44px);
 }
 h2 {
   margin: 0 0 14px;
@@ -1000,6 +1070,92 @@ figcaption {
   padding: 10px 12px;
   color: var(--muted);
   font-size: 14px;
+}
+.app-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.app-sidebar {
+  position: sticky;
+  top: 76px;
+  max-height: calc(100vh - 92px);
+  overflow: auto;
+  padding: 16px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--sidebar);
+}
+.app-content {
+  min-width: 0;
+  padding-bottom: 24px;
+}
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.sidebar-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.sidebar-head strong {
+  display: block;
+  font-size: 18px;
+}
+.sidebar-head span {
+  min-width: 36px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 12px;
+  text-align: center;
+}
+.sidebar-group {
+  border-top: 1px solid var(--line);
+  padding: 8px 0;
+}
+.sidebar-group summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--accent-strong);
+  font-weight: 750;
+  font-size: 14px;
+  list-style: none;
+}
+.sidebar-group summary::-webkit-details-marker { display: none; }
+.sidebar-group em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 12px;
+}
+.sidebar-link {
+  display: block;
+  margin: 4px 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.sidebar-link:hover, .sidebar-link.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+.sidebar-more {
+  display: block;
+  padding: 6px 8px;
+  color: var(--muted);
+  font-size: 12px;
 }
 .toolbar {
   display: grid;
@@ -1121,6 +1277,8 @@ footer {
 @media (max-width: 720px) {
   .site-header { align-items: flex-start; flex-direction: column; }
   .toolbar { grid-template-columns: 1fr; }
+  .app-shell { grid-template-columns: 1fr; }
+  .app-sidebar { position: static; max-height: none; }
   main { width: min(100vw - 24px, 1180px); }
 }
 """

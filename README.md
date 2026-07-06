@@ -8,10 +8,13 @@
   <a href="https://electkismet.github.io/AxData/"><strong>在线文档 / 接口文档</strong></a>
   ·
   <a href="https://electkismet.github.io/AxData/interfaces/">接口一览</a>
+  ·
+  <a href="https://pypi.org/project/axdata/">PyPI</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/electkismet/AxData/actions/workflows/ci.yml"><img alt="检查通过" src="https://img.shields.io/badge/检查-通过-2ea043"></a>
+  <a href="https://pypi.org/project/axdata/"><img alt="PyPI axdata" src="https://img.shields.io/pypi/v/axdata?label=PyPI&color=0969da"></a>
   <a href="https://electkismet.github.io/AxData/"><img alt="文档站" src="https://img.shields.io/badge/文档站-接口文档-0969da"></a>
   <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white">
   <a href="./LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/协议-Apache--2.0-blue"></a>
