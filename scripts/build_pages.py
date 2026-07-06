@@ -664,7 +664,7 @@ def render_interface_detail(
   <h2>输入参数</h2>
   {parameter_table(entry.get("parameters") or [])}
   {optional_note("参数说明", entry.get("params_note_zh"))}
-  {optional_note("参数示例", entry.get("params_example_zh"))}
+  {optional_code_note("参数示例", entry.get("params_example_zh"), "python")}
 </section>
 <section class="interface-section">
   <h2>返回字段</h2>
@@ -1010,6 +1010,13 @@ def optional_note(title: str, value: Any) -> str:
     if not text:
         return ""
     return f"<div class=\"note\"><strong>{escape(title)}</strong><p>{escape(text)}</p></div>"
+
+
+def optional_code_note(title: str, value: Any, lang: str = "") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return f"<div class=\"note code-note\"><strong>{escape(title)}</strong>{code_block(text, lang)}</div>"
 
 
 def response_preview(response: Sequence[Any]) -> str:
@@ -1809,6 +1816,10 @@ dd { margin: 4px 0 0; font-weight: 650; }
   border-left: 4px solid var(--accent);
   background: var(--accent-soft);
   border-radius: 6px;
+}
+.code-note pre {
+  margin-top: 10px;
+  background: #f7fbff;
 }
 .doc-grid {
   display: grid;
