@@ -1,6 +1,6 @@
 # AxData 发布打包验证
 
-本文记录 AxData 发布到 PyPI 前的本地验证流程。这里的命令只构建和安装本地候选包，不会上传 PyPI、TestPyPI 或 GitHub。
+本文记录 AxData 发布到 PyPI 前的本地验证流程，以及 GitHub Release 与 PyPI 同步发布方式。
 
 ## 包边界
 
@@ -27,7 +27,7 @@ python -m pip install axdata
 
 `axdata` 会同时安装当前默认数据源插件：`axdata-source-tdx`、`axdata-source-tdx-ext`、`axdata-source-tencent` 和 `axdata-source-cninfo`。TDX/TDX Ext 插件安装后应默认可用，用户不需要在快速开始里手动执行 `plugin enable`。
 
-发布顺序应先发 `axdata-core`，再发数据源插件包，最后发 `axdata`。
+发布顺序应先发 `axdata-core`，再发数据源插件包，最后发 `axdata`。GitHub Actions 的 release workflow 已按这个顺序执行。
 
 ## 本地 PyPI Readiness
 
@@ -62,7 +62,64 @@ $work = "$env:TEMP\axdata-pypi-readiness"
 .\.venv\Scripts\python scripts\pypi_readiness.py --skip-twine-check --json
 ```
 
-## 不包含的动作
+## GitHub Release 同步 PyPI
+
+仓库内的 `.github/workflows/release.yml` 负责发布自动化：
+
+- 发布 GitHub Release 时触发。
+- 先运行 PyPI readiness，确认 wheel、sdist、README 元数据、安装和插件发现都正常。
+- 构建 6 个候选包的 wheel 和 sdist。
+- 把构建产物附加到 GitHub Release。
+- 使用 PyPI Trusted Publishing 按顺序上传到 PyPI：先 `axdata-core`，再数据源插件包，最后 `axdata`。
+
+发布标签必须和包版本一致。例如当前所有候选包版本都是 `0.1.0`，则 GitHub Release 标签应为 `v0.1.0` 或 `0.1.0`。PyPI 不允许覆盖已发布的同名同版本文件；如果要重新发布，需要先提升版本号。
+
+### 首次发布前的 PyPI 设置
+
+当前 workflow 使用 PyPI Trusted Publishing，不需要在 GitHub 仓库里保存 PyPI token。首次发布前，需要在 PyPI 为以下项目配置 Trusted Publisher：
+
+| PyPI 项目 | GitHub owner | GitHub repo | Workflow | Environment |
+| --- | --- | --- | --- | --- |
+| `axdata-core` | `electkismet` | `AxData` | `release.yml` | `pypi` |
+| `axdata-source-tdx` | `electkismet` | `AxData` | `release.yml` | `pypi` |
+| `axdata-source-tdx-ext` | `electkismet` | `AxData` | `release.yml` | `pypi` |
+| `axdata-source-tencent` | `electkismet` | `AxData` | `release.yml` | `pypi` |
+| `axdata-source-cninfo` | `electkismet` | `AxData` | `release.yml` | `pypi` |
+| `axdata` | `electkismet` | `AxData` | `release.yml` | `pypi` |
+
+如果这些 PyPI 项目还没有创建，需要在 PyPI 创建对应项目或配置 pending publisher；最终以 PyPI 后台可用选项为准。
+
+### 发布前检查
+
+正式发布前建议按顺序确认：
+
+1. `main` 分支干净，CI 通过。
+2. 6 个候选包的 `pyproject.toml` 版本号一致。
+3. 本地 PyPI readiness 通过。
+4. PyPI 已为 6 个项目配置 Trusted Publisher。
+5. GitHub Release 标签等于当前包版本，例如 `v0.1.0`。
+
+可以先只跑构建检查，不上传 PyPI：
+
+```powershell
+gh workflow run release.yml --repo electkismet/AxData --ref main -f publish=false
+```
+
+确认无误后，在 GitHub 创建并发布 Release。发布 Release 后，workflow 会自动上传 PyPI：
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+gh release create v0.1.0 --repo electkismet/AxData --title "AxData v0.1.0" --notes "Initial public release"
+```
+
+如需手动重跑真实发布，必须从标签触发：
+
+```powershell
+gh workflow run release.yml --repo electkismet/AxData --ref v0.1.0 -f publish=true
+```
+
+## 本地脚本不包含的动作
 
 该脚本不做：
 
