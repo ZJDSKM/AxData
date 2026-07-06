@@ -43,9 +43,9 @@ TRUST_RANK: Mapping[str, int] = {
     PluginTrustLevel.OFFICIAL.value: 30,
 }
 
-DEFAULT_ENABLED_ENTRY_POINT_DISTS: Mapping[str, str] = {
-    "axdata.source.tdx_external": "axdata-source-tdx",
-    "axdata.source.tdx_ext_external": "axdata-source-tdx-ext",
+DEFAULT_ENABLED_ENTRY_POINT_DISTS: Mapping[str, tuple[str, ...]] = {
+    "axdata.source.tdx_external": ("axdata-source-tdx", "axdata"),
+    "axdata.source.tdx_ext_external": ("axdata-source-tdx-ext", "axdata"),
 }
 
 
@@ -335,11 +335,12 @@ class ProviderRegistry:
     def _default_entry_point_enabled(self, provider_id: str, entry_point: Any) -> bool | None:
         if self.disabled_provider_ids is not None and provider_id in self.disabled_provider_ids:
             return None
-        expected_dist = DEFAULT_ENABLED_ENTRY_POINT_DISTS.get(provider_id)
-        if expected_dist is None:
+        expected_dists = DEFAULT_ENABLED_ENTRY_POINT_DISTS.get(provider_id)
+        if expected_dists is None:
             return None
         actual_dist = _entry_point_distribution_name(entry_point)
-        if _normalize_dist_name(actual_dist) != _normalize_dist_name(expected_dist):
+        normalized_expected = {_normalize_dist_name(item) for item in expected_dists}
+        if _normalize_dist_name(actual_dist) not in normalized_expected:
             return None
         return True
 
@@ -624,6 +625,13 @@ def _read_manifest_from_distribution(distribution: Any, *, entry_point: Any | No
         if editable_raw is not None:
             return editable_raw
         raise ManifestError(f"Distribution {distribution.metadata.get('Name', '<unknown>')} has no file list.")
+    entry_point_raw = _read_entry_point_manifest_from_distribution(
+        distribution,
+        files=files,
+        entry_point=entry_point,
+    )
+    if entry_point_raw is not None:
+        return entry_point_raw
     candidates: list[tuple[int, Any]] = []
     for item in files:
         normalized = str(item).replace("\\", "/")
@@ -680,6 +688,59 @@ def _read_editable_manifest_from_distribution(
         except OSError:
             continue
     return None
+
+
+def _read_entry_point_manifest_from_distribution(
+    distribution: Any,
+    *,
+    files: Sequence[Any],
+    entry_point: Any | None,
+) -> str | None:
+    """Read the manifest adjacent to an entry point module in a bundled wheel."""
+
+    if entry_point is None:
+        return None
+    package_paths = _entry_point_package_paths(entry_point)
+    if not package_paths:
+        return None
+    for package_path in package_paths:
+        normalized_package = str(package_path).replace("\\", "/")
+        candidates = (
+            f"{normalized_package}/{PLUGIN_MANIFEST_FILE_NAME}",
+            f"{normalized_package}/{MANIFEST_FILE_NAME}",
+        )
+        for candidate in candidates:
+            for item in files:
+                normalized = str(item).replace("\\", "/")
+                if normalized != candidate:
+                    continue
+                try:
+                    return distribution.locate_file(item).read_text(encoding="utf-8")
+                except Exception:
+                    return None
+    return None
+
+
+def _entry_point_package_paths(entry_point: Any) -> tuple[Path, ...]:
+    entry_point_value = str(getattr(entry_point, "value", "") or "")
+    module_name = entry_point_value.split(":", 1)[0].split("[", 1)[0].strip()
+    if not module_name:
+        return ()
+    parts = [part for part in module_name.split(".") if part]
+    if not parts:
+        return ()
+    names = [parts[0]]
+    if len(parts) > 1:
+        names.append(".".join(parts[:-1]))
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for name in names:
+        normalized = re.sub(r"[^A-Za-z0-9_.]+", "", name).strip(".")
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        paths.append(Path(*normalized.split(".")))
+    return tuple(paths)
 
 
 def _editable_project_root(distribution: Any, *, files: Sequence[Any]) -> Path | None:

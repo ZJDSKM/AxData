@@ -6,12 +6,14 @@ PyPI 发布后，可用下面的命令安装轻量 SDK/CLI 包：
 pip install axdata
 ```
 
-`axdata` 会安装 AxData SDK、CLI/API 运行依赖、`axdata-core` 和默认随包提供的数据源 Provider 包。
+`axdata` 是用户侧唯一推荐安装入口。公开发布的 wheel 会同时带上 AxData SDK、
+CLI/API 运行依赖、核心框架和默认随包数据源 Provider 能力。
 
 TDX/TDX Ext source-provider 包安装后默认可用。`axdata doctor` 或 `axdata plugin list`
 只用于检查本地环境，不是使用 SDK 前的强制步骤。
 
-源码开发时，可以用 editable 模式安装本地包：
+源码开发时，仓库内部仍然按 core、SDK、数据源插件分目录维护。可以用 editable
+模式安装本地包：
 
 ```bash
 pip install -e "../../libs/axdata_core"
@@ -22,7 +24,8 @@ pip install -e "../axdata-source-tencent"
 pip install -e "../axdata-source-cninfo"
 ```
 
-SDK 包依赖 `axdata-core[parquet]` 和本地 API 运行依赖。默认本地模式可以直接读取
+公开 PyPI 包会把 `axdata_core` 和默认随包数据源模块打进同一个 `axdata` wheel。
+默认本地模式可以直接读取
 Parquet/DuckDB 数据、调用本机 Provider 接口，并运行 AxData CLI 诊断；不需要先启动 HTTP 服务。
 
 包名是 `axdata`，导入方式如下：

@@ -3,74 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-
-
-@dataclass(frozen=True)
-class PackageSpec:
-    dist_name: str
-    source_path: Path
-    import_name: str | None = None
-    provider_entry_point: str | None = None
-    provider_id: str | None = None
-
-    @property
-    def source_name(self) -> str:
-        return self.source_path.name
-
-    @property
-    def wheel_prefix(self) -> str:
-        return self.dist_name.replace("-", "_")
-
-
-PACKAGES: tuple[PackageSpec, ...] = (
-    PackageSpec(
-        "axdata-core",
-        REPO_ROOT / "libs" / "axdata_core",
-        import_name="axdata_core",
-    ),
-    PackageSpec(
-        "axdata",
-        REPO_ROOT / "packages" / "axdata-sdk",
-        import_name="axdata",
-    ),
-    PackageSpec(
-        "axdata-source-tdx",
-        REPO_ROOT / "packages" / "axdata-source-tdx",
-        import_name="axdata_source_tdx",
-        provider_entry_point="tdx",
-        provider_id="axdata.source.tdx_external",
-    ),
-    PackageSpec(
-        "axdata-source-tdx-ext",
-        REPO_ROOT / "packages" / "axdata-source-tdx-ext",
-        import_name="axdata_source_tdx_ext",
-        provider_entry_point="tdx_ext",
-        provider_id="axdata.source.tdx_ext_external",
-    ),
-    PackageSpec(
-        "axdata-source-tencent",
-        REPO_ROOT / "packages" / "axdata-source-tencent",
-        import_name="axdata_source_tencent",
-        provider_entry_point="tencent",
-        provider_id="axdata.source.tencent_external",
-    ),
-    PackageSpec(
-        "axdata-source-cninfo",
-        REPO_ROOT / "packages" / "axdata-source-cninfo",
-        import_name="axdata_source_cninfo",
-        provider_entry_point="cninfo",
-        provider_id="axdata.source.cninfo_external",
-    ),
-)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -87,7 +26,7 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Build AxData PyPI candidate distributions and install them in a fresh "
+            "Build the public axdata PyPI distribution and install it in a fresh "
             "temporary venv. This script never uploads to PyPI."
         )
     )
@@ -110,23 +49,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Upgrade pip in temporary venvs before installing tools/packages.",
     )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Print a JSON summary instead of text.",
-    )
+    parser.add_argument("--json", action="store_true", help="Print a JSON summary instead of text.")
     return parser
 
 
 def _run_check(args: argparse.Namespace, work_dir: Path) -> int:
-    sources_dir = work_dir / "sources"
     dist_dir = work_dir / "dist"
+    staging_dir = work_dir / "staging"
     data_root = work_dir / "runtime" / "data"
     build_venv = work_dir / "build-venv"
     install_venv = work_dir / "install-venv"
     commands: list[str] = []
-
-    copied_sources = _copy_package_sources(sources_dir)
 
     _create_venv(args.python, build_venv)
     build_python = _venv_python(build_venv)
@@ -137,13 +70,19 @@ def _run_check(args: argparse.Namespace, work_dir: Path) -> int:
     if not args.skip_twine_check:
         _run([*build_pip, "install", "twine>=5"], commands=commands)
 
-    artifacts: list[Path] = []
-    package_artifacts: dict[str, list[str]] = {}
-    for package in PACKAGES:
-        source = copied_sources[package.dist_name]
-        built = _build_distribution(build_python, source, dist_dir, commands=commands)
-        artifacts.extend(built)
-        package_artifacts[package.dist_name] = [path.name for path in built]
+    build_summary = _run_json(
+        [
+            str(build_python),
+            str(REPO_ROOT / "scripts" / "build_pypi_dist.py"),
+            "--output",
+            str(dist_dir),
+            "--work-dir",
+            str(staging_dir),
+            "--json",
+        ],
+        commands=commands,
+    )
+    artifacts = sorted(path for path in dist_dir.iterdir() if path.is_file())
 
     if not args.skip_twine_check:
         _run(
@@ -157,15 +96,9 @@ def _run_check(args: argparse.Namespace, work_dir: Path) -> int:
     if args.upgrade_pip:
         _run([*install_pip, "install", "--upgrade", "pip"], commands=commands)
 
-    wheel_paths = [_find_wheel(dist_dir, package) for package in PACKAGES]
+    wheel_path = _find_wheel(dist_dir)
     _run(
-        [
-            *install_pip,
-            "install",
-            "--find-links",
-            str(dist_dir),
-            *map(str, wheel_paths),
-        ],
+        [*install_pip, "install", "--find-links", str(dist_dir), str(wheel_path)],
         commands=commands,
     )
 
@@ -193,8 +126,10 @@ def _run_check(args: argparse.Namespace, work_dir: Path) -> int:
         "work_dir": str(work_dir),
         "dist_dir": str(dist_dir),
         "data_root": str(data_root),
-        "packages": package_artifacts,
-        "wheels_installed": [path.name for path in wheel_paths],
+        "package": "axdata",
+        "build": build_summary,
+        "artifacts": [path.name for path in artifacts],
+        "wheel_installed": wheel_path.name,
         "twine_check": "skipped" if args.skip_twine_check else "passed",
         "doctor_status": doctor.get("summary", {}).get("status") if isinstance(doctor, dict) else None,
         "runtime_status": status.get("summary", {}).get("status") if isinstance(status, dict) else None,
@@ -206,7 +141,7 @@ def _run_check(args: argparse.Namespace, work_dir: Path) -> int:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     else:
         print("AxData PyPI readiness check passed")
-        print(f"built packages: {', '.join(package.dist_name for package in PACKAGES)}")
+        print(f"built package: {summary['package']}")
         print(f"twine_check={summary['twine_check']}")
         print(f"doctor_status={summary['doctor_status']}")
         print(f"runtime_status={summary['runtime_status']}")
@@ -214,59 +149,10 @@ def _run_check(args: argparse.Namespace, work_dir: Path) -> int:
     return 0
 
 
-def _copy_package_sources(sources_dir: Path) -> dict[str, Path]:
-    sources_dir.mkdir(parents=True, exist_ok=True)
-    copied: dict[str, Path] = {}
-    for package in PACKAGES:
-        target = sources_dir / package.source_name
-        shutil.copytree(
-            package.source_path,
-            target,
-            ignore=shutil.ignore_patterns(
-                "__pycache__",
-                "*.pyc",
-                "*.egg-info",
-                "build",
-                "dist",
-            ),
-        )
-        copied[package.dist_name] = target
-    return copied
-
-
-def _create_venv(python: str, venv_dir: Path) -> None:
-    _run([python, "-m", "venv", str(venv_dir)], commands=[])
-
-
-def _build_distribution(
-    python: Path,
-    source: Path,
-    dist_dir: Path,
-    *,
-    commands: list[str],
-) -> list[Path]:
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    before = {path.name for path in dist_dir.iterdir() if path.is_file()}
-    _run(
-        [
-            str(python),
-            "-m",
-            "build",
-            "--sdist",
-            "--wheel",
-            "--outdir",
-            str(dist_dir),
-            str(source),
-        ],
-        commands=commands,
-    )
-    return sorted(path for path in dist_dir.iterdir() if path.is_file() and path.name not in before)
-
-
-def _find_wheel(dist_dir: Path, package: PackageSpec) -> Path:
-    matches = sorted(dist_dir.glob(f"{package.wheel_prefix}-*.whl"))
+def _find_wheel(dist_dir: Path) -> Path:
+    matches = sorted(dist_dir.glob("axdata-*.whl"))
     if not matches:
-        raise RuntimeError(f"No wheel found for {package.dist_name!r} in {dist_dir}")
+        raise RuntimeError(f"No axdata wheel found in {dist_dir}")
     return matches[-1]
 
 
@@ -313,29 +199,18 @@ if missing:
     raise AssertionError(f"missing provider entry points: {missing}")
 
 requires = metadata.requires("axdata") or []
-required_default_deps = [
-    "axdata-source-tdx",
-    "axdata-source-tdx-ext",
-    "axdata-source-tencent",
-    "axdata-source-cninfo",
-]
-default_dep_requires = [
+unexpected_split_deps = [
     requirement
     for requirement in requires
-    if "extra ==" not in requirement
+    if requirement.startswith("axdata-core") or requirement.startswith("axdata-source-")
 ]
-missing_default_deps = [
-    name
-    for name in required_default_deps
-    if not any(name in requirement for requirement in default_dep_requires)
-]
-if missing_default_deps:
-    raise AssertionError(f"missing axdata default requirements: {missing_default_deps}")
+if unexpected_split_deps:
+    raise AssertionError(f"axdata should be a single public wheel: {unexpected_split_deps}")
 
 print(json.dumps({
     "modules": modules,
     "provider_entry_points": entry_points,
-    "axdata_default_dependencies": default_dep_requires,
+    "axdata_dependencies": requires,
 }, ensure_ascii=False))
 """.strip()
     result = _run_capture([str(python), "-c", code], commands=commands)
@@ -361,10 +236,15 @@ def _summarize_providers(payload: object) -> dict[str, dict[str, object]]:
 
 
 def _verify_provider_ids(providers: dict[str, dict[str, object]]) -> None:
-    required = sorted(package.provider_id for package in PACKAGES if package.provider_id)
+    required = (
+        "axdata.source.tdx_external",
+        "axdata.source.tdx_ext_external",
+        "axdata.source.tencent_external",
+        "axdata.source.cninfo_external",
+    )
     missing = [provider_id for provider_id in required if provider_id not in providers]
     if missing:
-        raise RuntimeError(f"Installed package provider(s) not discovered: {missing}")
+        raise RuntimeError(f"Bundled provider(s) not discovered: {missing}")
 
 
 def _verify_default_enabled_providers(providers: dict[str, dict[str, object]]) -> None:
@@ -377,6 +257,10 @@ def _verify_default_enabled_providers(providers: dict[str, dict[str, object]]) -
     ]
     if disabled:
         raise RuntimeError(f"Provider(s) should be enabled by default after install: {disabled}")
+
+
+def _create_venv(python: str, venv_dir: Path) -> None:
+    _run([python, "-m", "venv", str(venv_dir)], commands=[])
 
 
 def _venv_python(venv_dir: Path) -> Path:

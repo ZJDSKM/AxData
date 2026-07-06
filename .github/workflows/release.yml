@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build and check Python distributions
+    name: Build and check axdata distribution
     runs-on: ubuntu-latest
 
     steps:
@@ -44,24 +44,8 @@ jobs:
           import tomllib
           from pathlib import Path
 
-          package_paths = {
-              "axdata-core": Path("libs/axdata_core/pyproject.toml"),
-              "axdata-source-tdx": Path("packages/axdata-source-tdx/pyproject.toml"),
-              "axdata-source-tdx-ext": Path("packages/axdata-source-tdx-ext/pyproject.toml"),
-              "axdata-source-tencent": Path("packages/axdata-source-tencent/pyproject.toml"),
-              "axdata-source-cninfo": Path("packages/axdata-source-cninfo/pyproject.toml"),
-              "axdata": Path("packages/axdata-sdk/pyproject.toml"),
-          }
-          versions = {}
-          for name, path in package_paths.items():
-              data = tomllib.loads(path.read_text(encoding="utf-8"))
-              versions[name] = data["project"]["version"]
-
-          unique_versions = sorted(set(versions.values()))
-          if len(unique_versions) != 1:
-              raise SystemExit(f"Package versions must match before release: {versions}")
-
-          version = unique_versions[0]
+          data = tomllib.loads(Path("packages/axdata-sdk/pyproject.toml").read_text(encoding="utf-8"))
+          version = data["project"]["version"]
           publish_requested = os.environ["PUBLISH_REQUESTED"].lower() == "true"
           tag = os.environ["RELEASE_TAG"]
           ref_type = os.environ["REF_TYPE"]
@@ -84,17 +68,11 @@ jobs:
       - name: Run PyPI readiness check
         run: python scripts/pypi_readiness.py --json
 
-      - name: Build release distributions
-        run: |
-          python -m build --sdist --wheel --outdir release-dist/axdata-core libs/axdata_core
-          python -m build --sdist --wheel --outdir release-dist/axdata-source-tdx packages/axdata-source-tdx
-          python -m build --sdist --wheel --outdir release-dist/axdata-source-tdx-ext packages/axdata-source-tdx-ext
-          python -m build --sdist --wheel --outdir release-dist/axdata-source-tencent packages/axdata-source-tencent
-          python -m build --sdist --wheel --outdir release-dist/axdata-source-cninfo packages/axdata-source-cninfo
-          python -m build --sdist --wheel --outdir release-dist/axdata packages/axdata-sdk
+      - name: Build release distribution
+        run: python scripts/build_pypi_dist.py --output release-dist/axdata --json
 
-      - name: Check release distributions
-        run: python -m twine check release-dist/*/*
+      - name: Check release distribution
+        run: python -m twine check release-dist/axdata/*
 
       - name: Upload distribution artifact
         uses: actions/upload-artifact@v4
@@ -122,74 +100,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" release-dist/*/* --clobber
+        run: gh release upload "$RELEASE_TAG" release-dist/axdata/* --clobber
 
-  publish-core:
-    name: Publish axdata-core to PyPI
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'release' || inputs.publish == true
-    environment:
-      name: pypi-axdata-core
-      url: https://pypi.org/project/axdata-core/
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Download distribution artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: pypi-dists
-          path: release-dist
-
-      - name: Publish axdata-core
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: release-dist/axdata-core
-          skip-existing: true
-
-  publish-source-providers:
-    name: Publish source providers to PyPI
-    runs-on: ubuntu-latest
-    needs: publish-core
-    if: github.event_name == 'release' || inputs.publish == true
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - package: axdata-source-tdx
-            environment: pypi-axdata-source-tdx
-          - package: axdata-source-tdx-ext
-            environment: pypi-axdata-source-tdx-ext
-          - package: axdata-source-tencent
-            environment: pypi-axdata-source-tencent
-          - package: axdata-source-cninfo
-            environment: pypi-axdata-source-cninfo
-    environment:
-      name: ${{ matrix.environment }}
-      url: https://pypi.org/project/${{ matrix.package }}/
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Download distribution artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: pypi-dists
-          path: release-dist
-
-      - name: Publish ${{ matrix.package }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: release-dist/${{ matrix.package }}
-          skip-existing: true
-
-  publish-sdk:
+  publish:
     name: Publish axdata to PyPI
     runs-on: ubuntu-latest
-    needs: publish-source-providers
+    needs: build
     if: github.event_name == 'release' || inputs.publish == true
     environment:
       name: pypi-axdata
