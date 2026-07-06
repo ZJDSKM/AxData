@@ -169,7 +169,98 @@ def load_interface_entries() -> list[dict[str, Any]]:
         for row in rows
         if row.get("enabled", True) is True and str(row.get("plugin_status", "enabled")) == "enabled"
     ]
-    return sorted(enabled_rows, key=interface_sort_key)
+    return sorted([*enabled_rows, *static_stream_interface_entries()], key=interface_sort_key)
+
+
+def static_stream_interface_entries() -> list[dict[str, Any]]:
+    """Add Web-console stream interfaces that are not source_request registry entries."""
+
+    return [
+        {
+            "name": "stock_quote_refresh_tdx",
+            "display_name_zh": "实时增量行情",
+            "source_name_zh": "通达信",
+            "source_code": "tdx",
+            "provider_id": "axdata.source.tdx_external",
+            "category": "实时数据",
+            "asset_class": "stock",
+            "request_mode": "stream",
+            "plugin_status": "enabled",
+            "effective_trust_level": "official",
+            "menu_path": ["通达信", "股票数据", "实时数据"],
+            "summary_zh": "通过本地 SDK stream 或远程 WebSocket 订阅股票实时增量行情；本地 Python 不需要启动 API 后端。",
+            "description_zh": (
+                "这个接口用于持续接收关注股票的最新行情变化。订阅建立后先返回一批当前快照，"
+                "之后推送有变化标的的最新状态；没有变化时 data 为空。它不是普通一次性请求，也不会默认写入本地数据。"
+            ),
+            "parameters": [
+                {
+                    "name": "code",
+                    "dtype": "string/list",
+                    "required": True,
+                    "description_zh": "证券代码：支持 000001.SZ、600000.SH；批量传数组，单次最多 100 只",
+                },
+                {"name": "fields", "dtype": "string/list", "required": False, "description_zh": "可选返回字段；不传时返回默认实时行情字段"},
+                {"name": "interval_ms", "dtype": "integer", "required": False, "description_zh": "刷新间隔，默认 3000 毫秒，最小 500 毫秒"},
+                {"name": "initial_snapshot", "dtype": "boolean", "required": False, "description_zh": "订阅后是否先返回当前快照，默认 true"},
+            ],
+            "fields": [
+                {"name": "stream", "dtype": "string", "description_zh": "固定为 stock_quote_refresh_tdx"},
+                {"name": "type", "dtype": "string", "description_zh": "消息类型：subscribed、snapshot、update、heartbeat、status 或 error"},
+                {"name": "subscription_id", "dtype": "string", "description_zh": "订阅编号"},
+                {"name": "data", "dtype": "array", "description_zh": "行情数据数组；无变化时为空数组"},
+                {"name": "instrument_id", "dtype": "string", "description_zh": "AxData 统一证券代码，例如 000001.SZ"},
+                {"name": "last_price", "dtype": "number", "description_zh": "最新价"},
+                {"name": "change_pct", "dtype": "number", "description_zh": "涨跌幅，百分比数值"},
+                {"name": "volume", "dtype": "number", "description_zh": "成交量"},
+                {"name": "amount", "dtype": "number", "description_zh": "成交额"},
+            ],
+            "params_note_zh": "这是实时流接口，不是普通 HTTP 一次性请求；本地 SDK stream 不需要启动 API 后端。",
+            "params_example_zh": (
+                'client.stream("stock_quote_refresh_tdx", code=["000001.SZ", "600000.SH"], interval_ms=3000)'
+            ),
+            "example": {
+                "request": {
+                    "code": ["000001.SZ", "600000.SH"],
+                    "fields": ["instrument_id", "last_price", "change_pct", "volume", "amount"],
+                    "interval_ms": 3000,
+                    "initial_snapshot": True,
+                },
+                "response": [
+                    {
+                        "type": "snapshot",
+                        "stream": "stock_quote_refresh_tdx",
+                        "subscription_id": "sub_xxx",
+                        "data": [
+                            {
+                                "instrument_id": "000001.SZ",
+                                "last_price": 10.14,
+                                "change_pct": -1.36,
+                                "volume": 1000,
+                                "amount": 1014000,
+                            }
+                        ],
+                    }
+                ],
+            },
+            "reference_sections": [
+                {
+                    "id": "stream-message-types",
+                    "title": "消息类型",
+                    "note": "客户端按 type 判断消息用途；行情行放在 data 里。",
+                    "columns": ["type", "含义", "说明"],
+                    "rows": [
+                        ["subscribed", "订阅确认", "服务端确认订阅参数和订阅编号"],
+                        ["snapshot", "初始快照", "订阅建立后返回当前最新行情"],
+                        ["update", "增量更新", "后续只推送有变化的标的最新状态"],
+                        ["heartbeat", "心跳响应", "客户端发送 ping 或 heartbeat 时返回"],
+                        ["status", "状态变化", "取消订阅、关闭等状态"],
+                        ["error", "错误", "参数错误、源端不可用或权限问题"],
+                    ],
+                }
+            ],
+        }
+    ]
 
 
 def ensure_repo_import_paths() -> None:
@@ -474,14 +565,6 @@ def nav_node_count(node: Mapping[str, Any]) -> int:
     return len(node.get("items") or []) + sum(nav_node_count(child) for child in children.values())
 
 
-def nav_node_has_active(node: Mapping[str, Any], active_slug: str | None) -> bool:
-    if not active_slug:
-        return False
-    if any(str(item.get("slug")) == active_slug for item in node.get("items") or []):
-        return True
-    return any(nav_node_has_active(child, active_slug) for child in (node.get("children") or {}).values())
-
-
 def render_nav_node(
     node: Mapping[str, Any],
     active_slug: str | None,
@@ -492,9 +575,6 @@ def render_nav_node(
     title = str(node["title"])
     children = sorted_nav_nodes(node.get("children") or {}, (*parent_path, title))
     items = sorted(node.get("items") or [], key=lambda entry: (str(entry.get("title") or ""), str(entry.get("name") or "")))
-    has_active = nav_node_has_active(node, active_slug)
-    open_by_default = has_active or (active_slug is None and level <= 1)
-    open_attr = " open" if open_by_default else ""
     child_html = "".join(
         render_nav_node(child, active_slug, level=level + 1, parent_path=(*parent_path, title))
         for child in children
@@ -502,7 +582,7 @@ def render_nav_node(
     item_html = "".join(render_nav_item(entry, active_slug, level + 1) for entry in items)
     count = nav_node_count(node)
     return f"""
-<details class="tree-group tree-level-{level}"{open_attr}>
+<details class="tree-group tree-level-{level}">
   <summary class="tree-group-toggle tree-level-{level}">
     <span class="tree-chevron"></span>
     <span>{escape(title)}</span>
@@ -554,9 +634,10 @@ def render_interface_detail(
 ) -> str:
     request = entry["example"]["request"]
     response = entry["example"]["response"]
+    is_stream = str(entry.get("request_mode") or "").lower() == "stream"
     meta = [
-        ("接口类型", "临时请求（HTTP POST，查一次返回一次）"),
-        ("调用路径", f"/v1/request/{entry['name']}"),
+        ("接口类型", "实时流（本地 SDK stream 或远程 WebSocket，持续推送）" if is_stream else "临时请求（HTTP POST，查一次返回一次）"),
+        ("调用路径", f"/v1/stream/{entry['name']}" if is_stream else f"/v1/request/{entry['name']}"),
         ("接口名称", entry["name"]),
         ("Provider", entry.get("provider_id") or entry.get("source_code") or ""),
         ("源", f"{entry['source_name_zh']} / {entry['source_code']}"),
@@ -593,12 +674,12 @@ def render_interface_detail(
   <h2>调用示例</h2>
   <div class="example-grid">
     <div>
-      <h3>Python SDK</h3>
-      {code_block(sdk_example(str(entry['name']), request), "python")}
+      <h3>{'Python SDK Stream' if is_stream else 'Python SDK'}</h3>
+      {code_block(stream_sdk_example(str(entry['name']), request) if is_stream else sdk_example(str(entry['name']), request), "python")}
     </div>
     <div>
-      <h3>HTTP API</h3>
-      {code_block(http_example(str(entry['name']), request), "http")}
+      <h3>{'WebSocket' if is_stream else 'HTTP API'}</h3>
+      {code_block(stream_websocket_example(str(entry['name']), request) if is_stream else http_example(str(entry['name']), request), "http")}
     </div>
   </div>
 </section>
@@ -988,6 +1069,38 @@ def sdk_example(interface_name: str, request: Mapping[str, Any]) -> str:
 def http_example(interface_name: str, request: Mapping[str, Any]) -> str:
     payload = json.dumps({"params": dict(request)}, ensure_ascii=False, indent=2)
     return f"POST /v1/request/{interface_name}\nContent-Type: application/json\n\n{payload}"
+
+
+def stream_sdk_example(interface_name: str, request: Mapping[str, Any]) -> str:
+    params = dict(request)
+    code = params.get("code", ["000001.SZ", "600000.SH"])
+    interval_ms = params.get("interval_ms", 3000)
+    fields = params.get("fields")
+    lines = [
+        "import axdata as ax",
+        "",
+        "client = ax.AxDataClient()",
+        "",
+        "with client.stream(",
+        f'    "{interface_name}",',
+        f"    code={python_literal(code)},",
+    ]
+    if fields:
+        lines.append(f"    fields={python_literal(fields)},")
+    lines.extend(
+        [
+            f"    interval_ms={python_literal(interval_ms)},",
+            ") as stream:",
+            "    for event in stream:",
+            "        print(event.type, event.data)",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def stream_websocket_example(interface_name: str, request: Mapping[str, Any]) -> str:
+    payload = json.dumps({"op": "subscribe", "params": dict(request)}, ensure_ascii=False, indent=2)
+    return f"ws://127.0.0.1:8666/v1/stream/{interface_name}\n\n# 连接后发送订阅消息\n{payload}"
 
 
 def code_block(value: str, lang: str = "") -> str:
