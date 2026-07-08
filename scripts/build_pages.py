@@ -143,7 +143,7 @@ def build_site(output_dir: str | Path = DEFAULT_OUTPUT_DIR) -> dict[str, Any]:
             render_interface_detail(entry, generated_at, prepared_entries),
         )
 
-    rendered_docs = render_doc_pages(output_path, prepared_entries)
+    rendered_docs = render_doc_pages(output_path, prepared_entries, generated_at)
     write_text(output_path / "docs" / "index.html", render_docs_index(rendered_docs, generated_at, prepared_entries))
 
     source_counts = Counter(entry["source_name_zh"] for entry in prepared_entries)
@@ -532,7 +532,7 @@ def render_home(entries: Sequence[Mapping[str, Any]], generated_at: str) -> str:
 </section>
 <p class="build-note">生成时间：{escape(generated_at)}</p>
 """
-    return page("AxData 文档站", body, active="home", search_entries=entries)
+    return page("AxData 文档站", body, active="home", search_entries=entries, asset_version=generated_at)
 
 
 def render_interface_index(entries: Sequence[Mapping[str, Any]], generated_at: str) -> str:
@@ -556,7 +556,7 @@ def render_interface_index(entries: Sequence[Mapping[str, Any]], generated_at: s
 <section class="toolbar">
   <label>
     搜索
-    <input id="interface-search" type="search" placeholder="输入接口名、中文名、字段或数据源">
+    <input id="interface-search" type="search" placeholder="输入接口名、中文名、字段、字段说明或数据源">
   </label>
   <label>
     数据源
@@ -601,7 +601,7 @@ sourceFilter.addEventListener("change", applyFilters);
 </script>
 """
     body = app_shell(interface_sidebar(entries), content)
-    return page("接口文档 - AxData", body, active="interfaces", search_entries=entries)
+    return page("接口文档 - AxData", body, active="interfaces", search_entries=entries, asset_version=generated_at)
 
 
 def app_shell(sidebar: str, content: str) -> str:
@@ -801,10 +801,20 @@ def render_interface_detail(
 <p class="build-note">生成时间：{escape(generated_at)}</p>
 """
     body = app_shell(interface_sidebar(entries, active_slug=str(entry["slug"])), content)
-    return page(f"{entry['title']} - AxData 接口文档", body, active="interfaces", search_entries=entries)
+    return page(
+        f"{entry['title']} - AxData 接口文档",
+        body,
+        active="interfaces",
+        search_entries=entries,
+        asset_version=generated_at,
+    )
 
 
-def render_doc_pages(output_path: Path, search_entries: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+def render_doc_pages(
+    output_path: Path,
+    search_entries: Sequence[Mapping[str, Any]],
+    generated_at: str,
+) -> list[dict[str, str]]:
     rendered: list[dict[str, str]] = []
     for filename, title in DOC_PAGES:
         source = REPO_ROOT / "docs" / filename
@@ -821,7 +831,13 @@ def render_doc_pages(output_path: Path, search_entries: Sequence[Mapping[str, An
 """
         write_text(
             output_path / "docs" / f"{slug}.html",
-            page(f"{title} - AxData 文档", body, active="docs", search_entries=search_entries),
+            page(
+                f"{title} - AxData 文档",
+                body,
+                active="docs",
+                search_entries=search_entries,
+                asset_version=generated_at,
+            ),
         )
         rendered.append({"title": title, "slug": slug, "filename": filename})
     return rendered
@@ -845,7 +861,13 @@ def render_docs_index(
 <section class="doc-grid">{items}</section>
 <p class="build-note">生成时间：{escape(generated_at)}</p>
 """
-    return page("开发文档 - AxData", body, active="docs", search_entries=search_entries)
+    return page(
+        "开发文档 - AxData",
+        body,
+        active="docs",
+        search_entries=search_entries,
+        asset_version=generated_at,
+    )
 
 
 def markdown_to_html(markdown: str, *, base_depth: int = 0) -> str:
@@ -1171,6 +1193,7 @@ def page(
     *,
     active: str,
     search_entries: Sequence[Mapping[str, Any]] | None = None,
+    asset_version: str = "",
 ) -> str:
     nav_items = (
         ("home", "首页", root_link(active, "index.html")),
@@ -1182,10 +1205,12 @@ def page(
         f"<a class=\"{'active' if key == active else ''}\" href=\"{escape(href)}\">{escape(label)}</a>"
         for key, label, href in nav_items
     )
-    css_href = root_link(active, "styles.css")
+    asset_token = re.sub(r"[^0-9A-Za-z_-]+", "", asset_version)
+    asset_query = f"?v={asset_token}" if asset_token else ""
+    css_href = root_link(active, f"styles.css{asset_query}")
     search = render_site_search(search_entries or [], active)
     if search_entries:
-        index_src = root_link(active, "interfaces/search-index.js")
+        index_src = root_link(active, f"interfaces/search-index.js{asset_query}")
         search_script = f"<script src=\"{escape(index_src)}\"></script>\n{site_search_script()}"
     else:
         search_script = ""
