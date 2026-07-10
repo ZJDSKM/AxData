@@ -20,7 +20,6 @@ _MODEL_MODULE = "axdata_source_tdx._tdx_wire.models.trade"
 _TIME_UTILS_MODULE = "axdata_source_tdx._tdx_wire._time_utils"
 _BINARY_EXPORTS = {
     "consume_tdx_signed_varint",
-    "consume_tdx_varint",
     "date_from_yyyymmdd",
     "little_f32",
     "little_u16",
@@ -41,10 +40,6 @@ def _binary():
 
 def _consume_tdx_signed_varint(payload: bytes, offset: int) -> tuple[int, int]:
     return _binary().consume_tdx_signed_varint(payload, offset)
-
-
-def _consume_tdx_varint(payload: bytes, offset: int) -> tuple[int, int]:
-    return _binary().consume_tdx_varint(payload, offset)
 
 
 def _date_from_yyyymmdd(raw: int):
@@ -182,10 +177,10 @@ def parse_trade_records(
         time_minutes = _little_u16(payload[offset : offset + 2])
         offset += 2
         price_delta_raw, offset = _consume_tdx_signed_varint(payload, offset)
-        volume, offset = _consume_tdx_varint(payload, offset)
-        order_count, offset = _consume_tdx_varint(payload, offset)
-        status_raw, offset = _consume_tdx_varint(payload, offset)
-        tail_raw, offset = _consume_tdx_varint(payload, offset)
+        volume, offset = _consume_tdx_signed_varint(payload, offset)
+        order_count, offset = _consume_tdx_signed_varint(payload, offset)
+        status_raw, offset = _consume_tdx_signed_varint(payload, offset)
+        tail_raw, offset = _consume_tdx_signed_varint(payload, offset)
         price_acc_raw += price_delta_raw
         trade_time = trade_time_from_minutes(time_minutes)
         trade_datetime = (

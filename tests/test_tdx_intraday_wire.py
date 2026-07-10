@@ -113,13 +113,13 @@ def test_parse_historical_intraday_payload_decodes_prices_and_times():
         + struct.pack("<f", 10.08)
         + _signed_varint(1013)
         + _signed_varint(0)
-        + _varint(120)
+        + _signed_varint(120)
         + _signed_varint(2)
         + _signed_varint(-1)
-        + _varint(80)
+        + _signed_varint(80)
         + _signed_varint(-1)
         + _signed_varint(1)
-        + _varint(90)
+        + _signed_varint(90)
     )
     response = ResponseFrame(
         control=0,
@@ -152,7 +152,9 @@ def test_parse_historical_intraday_payload_decodes_prices_and_times():
 
 
 def test_parse_historical_intraday_payload_maps_afternoon_time():
-    records = b"".join(_signed_varint(0) + _signed_varint(0) + _varint(0) for _ in range(121))
+    records = b"".join(
+        _signed_varint(0) + _signed_varint(0) + _signed_varint(0) for _ in range(121)
+    )
     payload = (121).to_bytes(2, "little") + struct.pack("<f", 10.08) + records
     response = ResponseFrame(
         control=0,
@@ -321,18 +323,4 @@ def _signed_varint(value: int) -> bytes:
         if remaining:
             byte |= 0x80
         out.append(byte)
-    return bytes(out)
-
-
-def _varint(value: int) -> bytes:
-    remaining = int(value)
-    out = []
-    while True:
-        byte = remaining & 0x7F
-        remaining >>= 7
-        if remaining:
-            byte |= 0x80
-        out.append(byte)
-        if not remaining:
-            break
     return bytes(out)

@@ -16,6 +16,12 @@ if sys.path and sys.path[0] == _TDX_PROVIDER_SRC:
     sys.path.pop(0)
 
 
+# Real 0x0FC5 payload: its first multi-byte volume field, a601, decodes to 102.
+LIVE_TRADE_PAYLOAD_HEX = (
+    "0a008003bb10a6010b00008003008803060000800300b104080000800300110200008003003a010000"
+    "80034198020601008003019f02070000800341860107010081030109010000840341b0699f040200"
+)
+
 
 def test_build_today_trades_frame_uses_0fc5_payload():
     frame = build_command_frame(
@@ -75,6 +81,32 @@ def test_parse_today_trades_payload_decodes_price_volume_and_side():
     assert [record.volume for record in series.records] == [89, 22, 86]
     assert [record.order_count for record in series.records] == [9, 5, 8]
     assert [record.side for record in series.records] == ["buy", "buy", "sell"]
+
+
+def test_parse_today_trades_payload_matches_real_tdx_compact_integer_encoding():
+    payload = bytes.fromhex(LIVE_TRADE_PAYLOAD_HEX)
+    response = ResponseFrame(
+        control=0x1C,
+        msg_id=4,
+        msg_type=TYPE_TODAY_TRADES,
+        zip_length=len(payload),
+        length=len(payload),
+        data=payload,
+        raw=b"",
+    )
+
+    series = parse_command_response(
+        TYPE_TODAY_TRADES,
+        response,
+        {"code": "sz000001", "start": 0, "count": 10},
+    )
+
+    assert series.count == 10
+    assert series.records[0].trade_time.isoformat(timespec="minutes") == "14:56"
+    assert series.records[0].price_acc_raw == 1083
+    assert series.records[0].volume == 102
+    assert series.records[0].order_count == 11
+    assert series.records[0].status_raw == 0
 
 
 def test_parse_historical_trades_payload_decodes_trade_datetime_and_status_5():
@@ -145,10 +177,10 @@ def _trade_record(
     return (
         time_minutes.to_bytes(2, "little")
         + _signed_varint(price_delta_raw)
-        + _varint(volume)
-        + _varint(order_count)
-        + _varint(status_raw)
-        + _varint(tail_raw)
+        + _signed_varint(volume)
+        + _signed_varint(order_count)
+        + _signed_varint(status_raw)
+        + _signed_varint(tail_raw)
     )
 
 
@@ -167,18 +199,4 @@ def _signed_varint(value: int) -> bytes:
         if remaining:
             byte |= 0x80
         out.append(byte)
-    return bytes(out)
-
-
-def _varint(value: int) -> bytes:
-    remaining = int(value)
-    out = []
-    while True:
-        byte = remaining & 0x7F
-        remaining >>= 7
-        if remaining:
-            byte |= 0x80
-        out.append(byte)
-        if not remaining:
-            break
     return bytes(out)
