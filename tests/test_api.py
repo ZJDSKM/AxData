@@ -1985,6 +1985,42 @@ def test_request_interface_source_adapter_error_returns_gateway_error(monkeypatc
     assert payload["meta"]["params"] == {"scope": "all"}
 
 
+def test_request_interface_preserves_structured_tdx_unavailable_error(monkeypatch, tmp_path):
+    from axdata_core import SourceUnavailableError
+
+    monkeypatch.setenv("AXDATA_DATA_DIR", str(tmp_path / "data"))
+
+    class DetailedTdxUnavailable(SourceUnavailableError):
+        code = "TDX_STATS_DATE_UNAVAILABLE"
+
+        def __init__(self):
+            super().__init__("TDX stats server still exposes an old date")
+            self.details = {
+                "stats_date": "20260610",
+                "target_trade_date": "20260612",
+            }
+
+    def fake_request_interface(interface_name, *, params, fields, persist, options=None, data_root=None):
+        raise DetailedTdxUnavailable()
+
+    monkeypatch.setattr(api_main, "core_request_interface", fake_request_interface, raising=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/request/stock_codes_tdx",
+        json={"params": {"scope": "all"}, "fields": ["instrument_id"]},
+    )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["error"]["code"] == "TDX_STATS_DATE_UNAVAILABLE"
+    assert payload["meta"]["error_details"] == {
+        "stats_date": "20260610",
+        "target_trade_date": "20260612",
+    }
+    assert "action_command" not in payload["meta"]
+
+
 @pytest.mark.parametrize(
     ("interface_name", "params", "fields"),
     [

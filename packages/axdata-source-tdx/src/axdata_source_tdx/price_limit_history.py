@@ -34,7 +34,8 @@ def price_limit_base_from_daily_kline(
         client,
         tdx_code,
         count=800,
-        stats_date=target_trade_date,
+        target_trade_date=target_trade_date,
+        require_trading_activity=False,
     )
     target_text = str(target_trade_date or "")
     base_bar = None

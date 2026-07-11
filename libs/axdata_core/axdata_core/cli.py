@@ -588,13 +588,14 @@ def _source_request(args: argparse.Namespace) -> int:
         )
     except SourceUnavailableError as exc:
         return _print_source_request_error(
-            code="SOURCE_UNAVAILABLE",
+            code=str(getattr(exc, "code", "SOURCE_UNAVAILABLE")),
             message=str(exc),
             interface_name=args.interface,
             params=params,
             fields=fields,
             options=options,
             args=args,
+            details=getattr(exc, "details", None),
         )
     except SourceAdapterError as exc:
         return _print_source_request_error(
@@ -1682,6 +1683,7 @@ def _print_source_request_error(
     fields: list[str] | None,
     options: dict[str, Any],
     args: argparse.Namespace,
+    details: Any = None,
 ) -> int:
     guidance = _source_request_guidance(code, interface_name)
     payload: dict[str, Any] = {
@@ -1698,6 +1700,8 @@ def _print_source_request_error(
             **guidance,
         },
     }
+    if details:
+        payload["error"]["details"] = details
     if args.json:
         _print_json(payload)
     else:
@@ -1711,6 +1715,16 @@ def _print_source_request_error(
 
 
 def _source_request_guidance(code: str, interface_name: str) -> dict[str, str | None]:
+    if code == "TDX_AUCTION_NOT_READY":
+        return {
+            "next_action": "等待目标交易日 09:25 竞价快照发布后重试。",
+            "action_command": None,
+        }
+    if code.startswith("TDX_STATS_"):
+        return {
+            "next_action": "TDX 统计资源暂不可用；保留了原缓存，请根据错误信息稍后重试。",
+            "action_command": None,
+        }
     if code == "SOURCE_UNAVAILABLE" and interface_name.endswith("_tdx"):
         return {
             "next_action": "安装并启用 TDX Provider 后重试该源端直取接口。",

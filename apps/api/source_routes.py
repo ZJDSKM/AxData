@@ -211,8 +211,10 @@ def request_source_interface(interface_name: str, request: SourceRequest) -> JSO
         )
         return JSONResponse(status_code=status.HTTP_501_NOT_IMPLEMENTED, content=to_jsonable(payload))
     except SourceUnavailableError as exc:
+        error_code = str(getattr(exc, "code", "SOURCE_UNAVAILABLE"))
+        error_details = getattr(exc, "details", None)
         payload = error_payload(
-            "SOURCE_UNAVAILABLE",
+            error_code,
             str(exc),
             interface_name=interface_name,
             request_mode="source_request",
@@ -221,7 +223,8 @@ def request_source_interface(interface_name: str, request: SourceRequest) -> JSO
             interface=interface,
             requested_fields=requested_fields,
             params=to_jsonable(request.params),
-            **source_request_error_guidance("SOURCE_UNAVAILABLE", interface_name),
+            error_details=to_jsonable(error_details) if error_details else None,
+            **source_request_error_guidance(error_code, interface_name),
         )
         return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=to_jsonable(payload))
     except SourceAdapterError as exc:
@@ -259,6 +262,16 @@ def request_source_interface(interface_name: str, request: SourceRequest) -> JSO
 
 
 def source_request_error_guidance(code: str, interface_name: str) -> dict[str, str | None]:
+    if code == "TDX_AUCTION_NOT_READY":
+        return {
+            "next_action": "等待目标交易日 09:25 竞价快照发布后重试。",
+            "action_command": None,
+        }
+    if code.startswith("TDX_STATS_"):
+        return {
+            "next_action": "TDX 统计资源暂不可用；保留了原缓存，请根据错误信息稍后重试。",
+            "action_command": None,
+        }
     if code == "SOURCE_UNAVAILABLE" and interface_name.endswith("_tdx"):
         return {
             "next_action": "安装并启用 TDX Provider 后重试该源端直取接口。",

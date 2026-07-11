@@ -15,14 +15,46 @@ from axdata_core import write_core_table
 
 
 class FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, *, status_code=200):
         self.payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
         return None
 
     def json(self):
         return self.payload
+
+
+def test_sdk_http_error_preserves_structured_source_error():
+    response = FakeResponse(
+        {
+            "success": False,
+            "error": {
+                "code": "TDX_STATS_DATE_UNAVAILABLE",
+                "message": "TDX stats date is not ready",
+            },
+            "meta": {
+                "error_details": {
+                    "stats_date": "20260610",
+                    "target_trade_date": "20260612",
+                }
+            },
+            "data": None,
+        },
+        status_code=503,
+    )
+
+    with pytest.raises(ax.AxDataError) as exc_info:
+        sdk_client.AxDataClient._raise_for_status(response)
+
+    assert str(exc_info.value) == "TDX stats date is not ready"
+    assert exc_info.value.code == "TDX_STATS_DATE_UNAVAILABLE"
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.details == {
+        "stats_date": "20260610",
+        "target_trade_date": "20260612",
+    }
 
 
 class FakeSession:

@@ -73,10 +73,19 @@ def stats_cache_root(cache_root: str | Path | None) -> Path:
     raise_tdx_plugin_required()
 
 
-def stats_cache_should_refresh(resource: "TdxStatsResource") -> bool:
+def stats_cache_should_refresh(
+    resource: "TdxStatsResource",
+    *,
+    target_trade_date: object = None,
+    previous_trade_date: object = None,
+) -> bool:
     implementation = _implementation()
     if implementation is not None:
-        return implementation.stats_cache_should_refresh(resource)
+        return implementation.stats_cache_should_refresh(
+            resource,
+            target_trade_date=target_trade_date,
+            previous_trade_date=previous_trade_date,
+        )
     from axdata_core.tdx_plugin_required import raise_tdx_plugin_required
 
     raise_tdx_plugin_required()
@@ -88,10 +97,19 @@ def build_stats_metadata(
     payload: bytes,
     source_path: str,
     target: Path,
+    target_trade_date: object = None,
+    previous_trade_date: object = None,
 ) -> dict[str, object]:
     implementation = _implementation()
     if implementation is not None:
-        return implementation.build_stats_metadata(resource, payload=payload, source_path=source_path, target=target)
+        return implementation.build_stats_metadata(
+            resource,
+            payload=payload,
+            source_path=source_path,
+            target=target,
+            target_trade_date=target_trade_date,
+            previous_trade_date=previous_trade_date,
+        )
     from axdata_core.tdx_plugin_required import raise_tdx_plugin_required
 
     raise_tdx_plugin_required()

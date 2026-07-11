@@ -27,7 +27,7 @@ def _fallback_tdx_server_cache_root(data_root: str | Path | None) -> str | None:
 
 
 def tdx_stats_cache_root(data_root: str | Path | None) -> str | None:
-    """Return the data-root scoped TDX statistics resource cache directory."""
+    """Return the configured TDX statistics resource cache directory."""
 
     implementation = _implementation()
     if implementation is not None:

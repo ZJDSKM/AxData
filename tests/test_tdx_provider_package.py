@@ -3465,6 +3465,10 @@ def test_tdx_provider_auction_price_limit_ladder_fetch_import_without_core_runti
         "    quote_count=1,\n"
         "    kline_page_count=2,\n"
         "    kline_volume_days=3,\n"
+        "    target_trade_date='20260626',\n"
+        "    previous_trade_date='20260625',\n"
+        "    market_date_source='test',\n"
+        "    alignment_counts={'same_day': 1},\n"
         ")\n"
         "fake_stats_obj = types.SimpleNamespace(source_path='provider-stats-path', stats_date='20260626')\n"
         "auction_meta = auction_fetch.auction_indicator_meta(\n"
@@ -4172,7 +4176,7 @@ def test_core_tdx_stats_resource_prefers_provider_package_when_available() -> No
         "from types import SimpleNamespace\n"
         "from axdata_core.adapters.tdx import stats_resource\n"
         "import axdata_source_tdx.stats_resource as provider_stats_resource\n"
-        "def fake_ensure(client, params, *, validation_error=ValueError):\n"
+        "def fake_ensure(client, params, *, validation_error=ValueError, **kwargs):\n"
         "    return SimpleNamespace(source_path='provider-stats', stats_date='20260626'), True\n"
         "provider_stats_resource.ensure_tdx_stats_resource_for_params = fake_ensure\n"
         "resource, refreshed = stats_resource.ensure_tdx_stats_resource_for_params(\n"
@@ -4368,23 +4372,36 @@ def test_tdx_stats_cache_import_does_not_load_resource_adapter() -> None:
     assert "source_request=False" in result.stdout
 
 
-def test_tdx_stats_cache_should_refresh_by_local_download_date() -> None:
+def test_tdx_stats_cache_should_refresh_by_market_date_alignment() -> None:
     from axdata_core.adapters.tdx import stats_cache
 
-    now = stats_cache.datetime.now(stats_cache.SHANGHAI_TZ)
-    same_day_resource = SimpleNamespace(
-        metadata={"downloaded_at": now.isoformat(timespec="seconds")}
+    same_day_resource = SimpleNamespace(stats_date="20260612", metadata={})
+    previous_trade_date_resource = SimpleNamespace(stats_date="20260611", metadata={})
+    stale_resource = SimpleNamespace(stats_date="20260610", metadata={})
+    checked_without_calendar = SimpleNamespace(
+        stats_date="20260611",
+        metadata={"checked_target_trade_date": "20260612"},
     )
-    previous_day_resource = SimpleNamespace(
-        metadata={"downloaded_at": (now - timedelta(days=1)).isoformat(timespec="seconds")}
-    )
-    missing_metadata_resource = SimpleNamespace(metadata={})
-    invalid_metadata_resource = SimpleNamespace(metadata={"downloaded_at": "not-a-date"})
 
-    assert stats_cache.stats_cache_should_refresh(same_day_resource) is False
-    assert stats_cache.stats_cache_should_refresh(previous_day_resource) is True
-    assert stats_cache.stats_cache_should_refresh(missing_metadata_resource) is True
-    assert stats_cache.stats_cache_should_refresh(invalid_metadata_resource) is True
+    assert stats_cache.stats_cache_should_refresh(
+        same_day_resource,
+        target_trade_date="20260612",
+        previous_trade_date="20260611",
+    ) is False
+    assert stats_cache.stats_cache_should_refresh(
+        previous_trade_date_resource,
+        target_trade_date="20260612",
+        previous_trade_date="20260611",
+    ) is False
+    assert stats_cache.stats_cache_should_refresh(
+        stale_resource,
+        target_trade_date="20260612",
+        previous_trade_date="20260611",
+    ) is True
+    assert stats_cache.stats_cache_should_refresh(
+        checked_without_calendar,
+        target_trade_date="20260612",
+    ) is False
 
 
 def test_tdx_stats_resolve_source_prefers_explicit_zip_cfg_dir_and_dir_zip(tmp_path) -> None:
@@ -5414,7 +5431,8 @@ def test_builtin_source_execution_registry_prefers_tdx_provider_package(tmp_path
     assert "tdx_downloader=False" in result.stdout
 
 
-def test_tdx_provider_package_source_execution_injects_cache_roots(tmp_path) -> None:
+def test_tdx_provider_package_source_execution_injects_cache_roots(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("AXDATA_TDX_STATS_ROOT", raising=False)
     code = (
         "import sys\n"
         "from axdata_core.source_execution_options import execution_options_for_source\n"
@@ -5462,6 +5480,15 @@ def test_tdx_provider_package_source_execution_injects_cache_roots(tmp_path) -> 
     assert "tdx_server_config=False" in result.stdout
     assert "tdx_request=False" in result.stdout
     assert "tdx_downloader=False" in result.stdout
+
+
+def test_tdx_stats_environment_cache_overrides_data_root(monkeypatch, tmp_path) -> None:
+    from axdata_source_tdx.server_cache import tdx_stats_cache_root
+
+    configured = tmp_path / "configured-stats-cache"
+    monkeypatch.setenv("AXDATA_TDX_STATS_ROOT", str(configured))
+
+    assert tdx_stats_cache_root(tmp_path / "data") == str(configured.resolve())
 
 
 def test_tdx_source_execution_registry_is_provider_owned_and_lightweight() -> None:
@@ -5902,10 +5929,13 @@ def test_tdx_public_runtime_modules_are_provider_owned_or_compat_only() -> None:
         "adapter.py",
         "catalog.py",
         "collectors.py",
+        "market_dates.py",
         "metadata.py",
         "provider.py",
         "request_adapter.py",
         "request_entrypoints.py",
+        "stats_errors.py",
+        "stats_validation.py",
         "tdx_f10_catalog.py",
         "tdx_f10_models.py",
         "tdx_f10_names.py",
@@ -6563,8 +6593,11 @@ def test_tdx_provider_package_builds_wheel_with_manifest_and_entry_point(tmp_pat
         assert "axdata_source_tdx/source_execution.py" in names
         assert "axdata_source_tdx/source_execution_registry.py" in names
         assert "axdata_source_tdx/stats_cache.py" in names
+        assert "axdata_source_tdx/stats_errors.py" in names
         assert "axdata_source_tdx/stats_models.py" in names
         assert "axdata_source_tdx/stats_resource.py" in names
+        assert "axdata_source_tdx/stats_validation.py" in names
+        assert "axdata_source_tdx/market_dates.py" in names
         assert "axdata_source_tdx/resources/finance_maps/__init__.py" in names
         assert "axdata_source_tdx/resources/finance_maps/incon.dat" in names
         assert "axdata_source_tdx/resources/finance_maps/tdxhy.cfg" in names
@@ -6701,6 +6734,45 @@ def test_tdx_provider_installed_from_wheel_is_discovered_and_can_route(
     assert "axdata_source_tdx.provider_bridge" in sys.modules
     assert "axdata_core.adapters.tdx.provider_bridge" not in sys.modules
     assert "axdata_core.adapters.tdx.request" in sys.modules
+
+    first_cwd = tmp_path / "wheel-cwd-one"
+    second_cwd = tmp_path / "wheel-cwd-two"
+    local_app_data = tmp_path / "local-app-data"
+    first_cwd.mkdir()
+    second_cwd.mkdir()
+    cache_code = (
+        "from axdata_source_tdx.stats_cache import default_tdx_stats_cache_root\n"
+        "print(default_tdx_stats_cache_root())\n"
+    )
+    cache_env = {
+        key: value
+        for key, value in os.environ.items()
+        if key != "AXDATA_TDX_STATS_ROOT"
+    }
+    cache_env.update(
+        {
+            "LOCALAPPDATA": str(local_app_data),
+            "PYTHONPATH": os.pathsep.join(
+                [str(install_root), str(REPO_ROOT / "libs" / "axdata_core")]
+            ),
+        }
+    )
+    cache_paths = [
+        subprocess.run(
+            [sys.executable, "-c", cache_code],
+            check=True,
+            cwd=cwd,
+            env=cache_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ).stdout.strip()
+        for cwd in (first_cwd, second_cwd)
+    ]
+    expected_cache = str(
+        (local_app_data / "AxData" / "cache" / "tdx" / "stats").resolve()
+    )
+    assert cache_paths == [expected_cache, expected_cache]
 
 
 def _build_tdx_wheel(tmp_path: Path) -> Path:

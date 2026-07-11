@@ -50,6 +50,8 @@ def refresh_tdx_stats_resource(
     cache_root: str | Path | None = None,
     source_path: str = DEFAULT_TDX_STATS_RESOURCE_PATH,
     chunk_size: int = DEFAULT_TDX_STATS_CHUNK_SIZE,
+    target_trade_date: Any = None,
+    previous_trade_date: Any = None,
 ) -> TdxStatsResource:
     implementation = _implementation()
     if implementation is not None:
@@ -58,6 +60,8 @@ def refresh_tdx_stats_resource(
             cache_root=cache_root,
             source_path=source_path,
             chunk_size=chunk_size,
+            target_trade_date=target_trade_date,
+            previous_trade_date=previous_trade_date,
         )
     from axdata_core.tdx_plugin_required import raise_tdx_plugin_required
 
@@ -69,6 +73,8 @@ def request_tdx_stats_resource(
     *,
     source_path: str = DEFAULT_TDX_STATS_RESOURCE_PATH,
     chunk_size: int = DEFAULT_TDX_STATS_CHUNK_SIZE,
+    target_trade_date: Any = None,
+    previous_trade_date: Any = None,
 ) -> TdxStatsResource:
     implementation = _implementation()
     if implementation is not None:
@@ -76,6 +82,8 @@ def request_tdx_stats_resource(
             client,
             source_path=source_path,
             chunk_size=chunk_size,
+            target_trade_date=target_trade_date,
+            previous_trade_date=previous_trade_date,
         )
     from axdata_core.tdx_plugin_required import raise_tdx_plugin_required
 
@@ -88,6 +96,8 @@ def ensure_tdx_stats_resource(
     root: str | Path | None = None,
     cache_root: str | Path | None = None,
     refresh: bool = False,
+    target_trade_date: Any = None,
+    previous_trade_date: Any = None,
 ) -> tuple[TdxStatsResource, bool]:
     implementation = _implementation()
     if implementation is not None:
@@ -96,6 +106,8 @@ def ensure_tdx_stats_resource(
             root=root,
             cache_root=cache_root,
             refresh=refresh,
+            target_trade_date=target_trade_date,
+            previous_trade_date=previous_trade_date,
         )
     from axdata_core.tdx_plugin_required import raise_tdx_plugin_required
 
@@ -107,6 +119,8 @@ def ensure_tdx_stats_resource_for_params(
     params: Mapping[str, object] | None,
     *,
     validation_error: type[ValueError] = ValueError,
+    target_trade_date: Any = None,
+    previous_trade_date: Any = None,
 ) -> tuple[TdxStatsResource, bool]:
     implementation = _implementation()
     if implementation is not None:
@@ -114,6 +128,8 @@ def ensure_tdx_stats_resource_for_params(
             client,
             params,
             validation_error=validation_error,
+            target_trade_date=target_trade_date,
+            previous_trade_date=previous_trade_date,
         )
     from axdata_core.tdx_plugin_required import raise_tdx_plugin_required
 
@@ -160,10 +176,19 @@ def _validate_stats_zip(payload: bytes) -> None:
     raise_tdx_plugin_required()
 
 
-def _stats_cache_should_refresh(resource: TdxStatsResource) -> bool:
+def _stats_cache_should_refresh(
+    resource: TdxStatsResource,
+    *,
+    target_trade_date: Any = None,
+    previous_trade_date: Any = None,
+) -> bool:
     implementation = _implementation()
     if implementation is not None:
-        return implementation._stats_cache_should_refresh(resource)
+        return implementation._stats_cache_should_refresh(
+            resource,
+            target_trade_date=target_trade_date,
+            previous_trade_date=previous_trade_date,
+        )
     from axdata_core.tdx_plugin_required import raise_tdx_plugin_required
 
     raise_tdx_plugin_required()
@@ -175,10 +200,19 @@ def _build_stats_metadata(
     payload: bytes,
     source_path: str,
     target: Path,
+    target_trade_date: Any = None,
+    previous_trade_date: Any = None,
 ) -> dict[str, object]:
     implementation = _implementation()
     if implementation is not None:
-        return implementation._build_stats_metadata(resource, payload=payload, source_path=source_path, target=target)
+        return implementation._build_stats_metadata(
+            resource,
+            payload=payload,
+            source_path=source_path,
+            target=target,
+            target_trade_date=target_trade_date,
+            previous_trade_date=previous_trade_date,
+        )
     from axdata_core.tdx_plugin_required import raise_tdx_plugin_required
 
     raise_tdx_plugin_required()

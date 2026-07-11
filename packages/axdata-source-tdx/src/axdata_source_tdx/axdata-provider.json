@@ -5062,7 +5062,7 @@
         },
         {
           "name": "stats_cache_root",
-          "display_name_zh": "可选缓存目录：自动下载的 zhb.zip 和 zhb.meta.json 会保存到这里；不传时使用项目 cache/tdx/stats。",
+          "display_name_zh": "可选缓存目录：SDK/API 默认使用 data_root/cache/tdx/stats，直接适配器默认使用系统用户缓存；也可通过 AXDATA_TDX_STATS_ROOT 指定。",
           "type": "string",
           "required": false,
           "multiple": false,
@@ -5070,7 +5070,7 @@
           "enum": [],
           "control": null,
           "placeholder": null,
-          "description": "可选缓存目录：自动下载的 zhb.zip 和 zhb.meta.json 会保存到这里；不传时使用项目 cache/tdx/stats。"
+          "description": "可选缓存目录：SDK/API 默认使用 data_root/cache/tdx/stats，直接适配器默认使用系统用户缓存；也可通过 AXDATA_TDX_STATS_ROOT 指定。"
         },
         {
           "name": "refresh_stats",
@@ -9720,7 +9720,7 @@
         },
         {
           "name": "stats_cache_root",
-          "display_name_zh": "可选缓存目录：自动下载的 zhb.zip 和 zhb.meta.json 会保存到这里；不传时使用项目 cache/tdx/stats。",
+          "display_name_zh": "可选缓存目录：SDK/API 默认使用 data_root/cache/tdx/stats，直接适配器默认使用系统用户缓存；也可通过 AXDATA_TDX_STATS_ROOT 指定。",
           "type": "string",
           "required": false,
           "multiple": false,
@@ -9728,7 +9728,7 @@
           "enum": [],
           "control": null,
           "placeholder": null,
-          "description": "可选缓存目录：自动下载的 zhb.zip 和 zhb.meta.json 会保存到这里；不传时使用项目 cache/tdx/stats。"
+          "description": "可选缓存目录：SDK/API 默认使用 data_root/cache/tdx/stats，直接适配器默认使用系统用户缓存；也可通过 AXDATA_TDX_STATS_ROOT 指定。"
         },
         {
           "name": "refresh_stats",

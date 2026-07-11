@@ -288,7 +288,7 @@ client.call("stock_daily_share_tdx", code="000001.SZ", refresh_stats=True)`,
     ["code", "string/list", "否", "证券代码：不传或传 all 表示全量；也支持 000001、000001.SZ、sz000001；批量可传数组或英文逗号分隔字符串"],
     ["scope", "string/list", "否", "股票范围：code 不传或为 all 时生效；all 全部、main 主板、star 科创板、chinext 创业板、bse 北交所、cdr CDR；默认 all"],
     ["refresh_stats", "boolean", "否", "是否强制刷新盘前统计缓存；默认 false"],
-    ["stats_cache_root", "string", "否", "盘前统计资源缓存目录；不传时使用项目 cache/tdx/stats"]
+    ["stats_cache_root", "string", "否", "盘前统计资源缓存目录；SDK/API 默认使用 data_root/cache/tdx/stats，直接适配器使用系统用户缓存"]
   ],
   fieldColumns: ["字段", "中文名", "类型", "说明"],
   fields: dailyShareFields,
@@ -1169,7 +1169,7 @@ client.call("stock_shortline_indicators_tdx", code="002971.SZ", stats_cache_root
   params: [
     ["code", "string/list", "是", "证券代码：支持 000001、000001.SZ、sz000001；批量可传数组或英文逗号分隔字符串"],
     ["refresh_stats", "boolean", "否", "是否强制从源端刷新 AxData 项目缓存里的统计资源；默认 false"],
-    ["stats_cache_root", "string", "否", "自动下载统计资源的缓存目录；不传时使用项目 cache/tdx/stats"],
+    ["stats_cache_root", "string", "否", "自动下载统计资源的缓存目录；SDK/API 默认使用 data_root/cache/tdx/stats，直接适配器使用系统用户缓存"],
     ["stats_root", "string", "否", "可选覆盖路径；可传包含 tdxstat.cfg/tdxstat2.cfg 的目录，或直接传 zhb.zip 文件路径"]
   ],
   fieldColumns: ["字段", "中文名", "类型", "说明"],

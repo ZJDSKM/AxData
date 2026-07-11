@@ -792,6 +792,44 @@ def test_cli_request_validation_error_is_json_guidance(capsys, monkeypatch, tmp_
     assert payload["meta"]["next_action"]
 
 
+def test_cli_request_preserves_structured_tdx_error(capsys, monkeypatch, tmp_path) -> None:
+    from axdata_core.source_errors import SourceUnavailableError
+    import axdata_core.source_request as source_request_module
+
+    class DetailedTdxError(SourceUnavailableError):
+        code = "TDX_STATS_REFRESH_DEFERRED"
+
+        def __init__(self):
+            super().__init__("TDX stats refresh is deferred")
+            self.details = {"retry_after_seconds": 240}
+
+    def fake_request_interface(*_args, **_kwargs):
+        raise DetailedTdxError()
+
+    monkeypatch.setattr(source_request_module, "request_interface", fake_request_interface)
+
+    exit_code = main(
+        [
+            "--data-root",
+            str(tmp_path / "data"),
+            "request",
+            "stock_order_book_tdx",
+            "--param",
+            "code=000001.SZ",
+            "--json",
+        ]
+    )
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == {
+        "code": "TDX_STATS_REFRESH_DEFERRED",
+        "message": "TDX stats refresh is deferred",
+        "details": {"retry_after_seconds": 240},
+    }
+    assert payload["meta"]["action_command"] is None
+
+
 def test_init_config_and_doctor_cli_report_local_environment(capsys, tmp_path) -> None:
     data_root = tmp_path / "data"
 

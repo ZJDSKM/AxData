@@ -13,6 +13,10 @@ class AuctionIndicatorRowsResult:
     quote_count: int
     kline_page_count: int
     kline_volume_days: int
+    target_trade_date: str | None
+    previous_trade_date: str | None
+    market_date_source: str
+    alignment_counts: dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -41,11 +45,31 @@ def auction_indicator_request_result(
     progress_callback: Callable[..., None] | None = None,
 ) -> AuctionIndicatorRequestResult:
     tdx_codes = requested_codes(params.get("code"))
+    from .market_dates import resolve_market_date_context
+
+    date_context = resolve_market_date_context(client)
+    if not date_context.ready:
+        from .stats_errors import TdxAuctionNotReadyError
+
+        raise TdxAuctionNotReadyError(
+            "TDX auction snapshot is not ready for the target trade date "
+            f"{date_context.target_trade_date or 'unknown'} ({date_context.phase}).",
+            target_trade_date=date_context.target_trade_date,
+            phase=date_context.phase,
+            market_date_source=date_context.source,
+        )
     stats, stats_refreshed = _ensure_tdx_stats_resource_for_params(
         client,
         params,
         validation_error=validation_error,
+        target_trade_date=date_context.target_trade_date,
+        previous_trade_date=date_context.previous_trade_date,
     )
+    if date_context.target_trade_date is None:
+        date_context = resolve_market_date_context(
+            client,
+            fallback_trade_date=stats.stats_date,
+        )
     emit_source_progress(
         progress_callback,
         30,
@@ -67,6 +91,7 @@ def auction_indicator_request_result(
         finance_rows_by_tdx_code=finance_rows_by_tdx_code,
         request_recent_daily_bars=request_recent_daily_bars,
         normalize_auction_indicator_row=normalize_auction_indicator_row,
+        date_context=date_context,
     )
     return AuctionIndicatorRequestResult(
         rows=result.rows,
@@ -96,6 +121,11 @@ def auction_indicator_meta(
         "tdx_returned_count": len(result.rows),
         "tdx_kline_page_count": result.kline_page_count,
         "tdx_kline_volume_days": result.kline_volume_days,
+        "tdx_target_trade_date": result.target_trade_date,
+        "tdx_previous_trade_date": result.previous_trade_date,
+        "tdx_market_date_source": result.market_date_source,
+        "tdx_stats_alignment_counts": result.alignment_counts,
+        "partial": any(key not in {"same_day", "previous_trading_day"} for key in result.alignment_counts),
     }
 
 
@@ -112,6 +142,7 @@ def auction_indicator_rows(
     finance_rows_by_tdx_code: Callable[..., tuple[dict[str, dict[str, Any]], int]],
     request_recent_daily_bars: Callable[..., tuple[list[Any], int]],
     normalize_auction_indicator_row: Callable[..., dict[str, Any]],
+    date_context: Any,
 ) -> AuctionIndicatorRowsResult:
     securities = [quote_security_from_tdx_code(tdx_code) for tdx_code in tdx_codes]
     quotes = as_list(tdx_explicit_quotes(client, securities))
@@ -124,28 +155,38 @@ def auction_indicator_rows(
     rows: list[dict[str, Any]] = []
     kline_page_count = 0
     kline_volume_days = 0
+    alignment_counts: dict[str, int] = {}
     for tdx_code in tdx_codes:
         quote = quote_by_tdx_code.get(tdx_code)
         if quote is None:
             continue
         stat_row, stat2_row = stats.row(market_to_id.get(tdx_code[:2], 0), tdx_code[2:])
+        target_trade_date = date_context.target_trade_date or get_value(
+            stat2_row,
+            "stats_date",
+            get_value(stat_row, "stats_date", None),
+        )
         recent_daily_bars, page_count = request_recent_daily_bars(
             client,
             tdx_code,
             count=8,
-            stats_date=get_value(stat_row, "stats_date", None) or get_value(stat2_row, "stats_date", None),
+            target_trade_date=target_trade_date,
+            require_trading_activity=True,
         )
         kline_page_count += page_count
         kline_volume_days += min(5, len(recent_daily_bars))
-        rows.append(
-            normalize_auction_indicator_row(
-                quote,
-                stat_row=stat_row,
-                stat2_row=stat2_row,
-                recent_daily_bars=recent_daily_bars,
-                finance_row=finance_by_tdx_code.get(tdx_code),
-            )
+        row = normalize_auction_indicator_row(
+            quote,
+            stat_row=stat_row,
+            stat2_row=stat2_row,
+            target_trade_date=target_trade_date,
+            previous_trade_date=_bar_trade_date(recent_daily_bars[0]) if recent_daily_bars else None,
+            recent_daily_bars=recent_daily_bars,
+            finance_row=finance_by_tdx_code.get(tdx_code),
         )
+        alignment_status = str(row.pop("_indicator_status", "unknown"))
+        alignment_counts[alignment_status] = alignment_counts.get(alignment_status, 0) + 1
+        rows.append(row)
 
     rows.sort(key=lambda row: str(row.get("instrument_id") or ""))
     return AuctionIndicatorRowsResult(
@@ -153,7 +194,17 @@ def auction_indicator_rows(
         quote_count=len(quotes),
         kline_page_count=kline_page_count,
         kline_volume_days=kline_volume_days,
+        target_trade_date=date_context.target_trade_date,
+        previous_trade_date=date_context.previous_trade_date,
+        market_date_source=date_context.source,
+        alignment_counts=alignment_counts,
     )
+
+
+def _bar_trade_date(bar: Any) -> str | None:
+    from .normalize_utils import bar_trade_date
+
+    return bar_trade_date(bar)
 
 
 def _ensure_tdx_stats_resource_for_params(*args: Any, **kwargs: Any) -> tuple[Any, bool]:

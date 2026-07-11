@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -29,16 +30,16 @@ class TdxStat2Row:
     market_id: int
     code: str
     stats_date: str | None
+    amount_10k: float | None
+    seal_amount_10k: float | None
     prev_amount_10k: float | None
     prev_seal_amount_10k: float | None
     prev2_amount_10k: float | None
     prev2_seal_amount_10k: float | None
-    prev3_amount_10k: float | None
-    prev3_seal_amount_10k: float | None
+    open_volume_hand: float | None
     prev_open_volume_hand: float | None
-    prev2_open_volume_hand: float | None
+    open_amount_10k: float | None
     prev_open_amount_10k: float | None
-    prev2_open_amount_10k: float | None
 
     @property
     def key(self) -> tuple[int, str]:
@@ -58,17 +59,32 @@ class TdxStatsResource:
 
     @property
     def stats_date(self) -> str | None:
-        for row in self.stat2.values():
-            if row.stats_date:
-                return row.stats_date
-        for row in self.stat.values():
-            if row.stats_date:
-                return row.stats_date
+        counts = self.stats_date_counts
+        if counts:
+            return max(counts, key=lambda value: (counts[value], value))
         if self.metadata:
             value = self.metadata.get("stats_date")
             if value:
                 return str(value)
         return None
+
+    @property
+    def stats_date_counts(self) -> dict[str, int]:
+        values = [
+            row.stats_date
+            for row in (*self.stat.values(), *self.stat2.values())
+            if row.stats_date
+        ]
+        return dict(Counter(values))
+
+    @property
+    def stats_date_coverage(self) -> float:
+        total = len(self.stat) + len(self.stat2)
+        counts = self.stats_date_counts
+        if total == 0 or not counts:
+            return 0.0
+        dominant_date = max(counts, key=lambda value: (counts[value], value))
+        return counts[dominant_date] / total
 
 
 def stats_resource_from_lines(
@@ -126,16 +142,16 @@ def parse_stat2_rows(lines: Iterable[str]) -> Iterable[TdxStat2Row]:
             market_id=market_id,
             code=code,
             stats_date=text_value(parts[2]),
-            prev_amount_10k=float_value(parts[3]),
-            prev_seal_amount_10k=float_value(parts[4]),
-            prev2_amount_10k=float_value(parts[5]),
-            prev2_seal_amount_10k=float_value(parts[6]),
-            prev3_amount_10k=float_value(parts[7]),
-            prev3_seal_amount_10k=float_value(parts[8]),
-            prev_open_volume_hand=float_value(parts[9]),
-            prev2_open_volume_hand=float_value(parts[10]),
-            prev_open_amount_10k=float_value(parts[14]),
-            prev2_open_amount_10k=float_value(parts[15]),
+            amount_10k=float_value(parts[3]),
+            seal_amount_10k=float_value(parts[4]),
+            prev_amount_10k=float_value(parts[5]),
+            prev_seal_amount_10k=float_value(parts[6]),
+            prev2_amount_10k=float_value(parts[7]),
+            prev2_seal_amount_10k=float_value(parts[8]),
+            open_volume_hand=float_value(parts[9]),
+            prev_open_volume_hand=float_value(parts[10]),
+            open_amount_10k=float_value(parts[14]),
+            prev_open_amount_10k=float_value(parts[15]),
         )
 
 

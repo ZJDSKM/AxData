@@ -67,6 +67,7 @@ def _enable_local_tdx_provider(monkeypatch, tmp_path):
 
     data_root = tmp_path / "axdata"
     monkeypatch.setenv("AXDATA_DATA_DIR", str(data_root))
+    monkeypatch.setenv("AXDATA_TDX_STATS_ROOT", str(tmp_path / "default-tdx-stats-cache"))
     for root in (data_root, tmp_path, tmp_path / "data"):
         enable_provider(TDX_PROVIDER_ID, data_root=root)
 
@@ -4629,6 +4630,349 @@ def test_source_request_gateway_filters_stock_auction_result_history_fields():
     assert result.meta["tdx_protocol"] == "0x0fc6"
 
 
+def test_tdx_stat2_parser_maps_current_and_prior_day_columns():
+    from axdata_source_tdx.stats_models import parse_stat2_rows
+
+    line = (
+        "0|002841|20260710|242501.84||254664.58|851.80|134819.47|3468.47|"
+        "11141|9513|51.90|54.67|880812|6002.06|4291.39|19.060|55.980|31.360|43.54|37.30"
+    )
+
+    row = next(iter(parse_stat2_rows([line])))
+
+    assert row.amount_10k == 242501.84
+    assert row.seal_amount_10k is None
+    assert row.prev_amount_10k == 254664.58
+    assert row.prev_seal_amount_10k == 851.80
+    assert row.prev2_amount_10k == 134819.47
+    assert row.prev2_seal_amount_10k == 3468.47
+    assert row.open_volume_hand == 11141
+    assert row.prev_open_volume_hand == 9513
+    assert row.open_amount_10k == 6002.06
+    assert row.prev_open_amount_10k == 4291.39
+
+
+def test_recent_daily_bars_excludes_base_date_and_accumulates_pages():
+    from axdata_source_tdx.series_history import request_recent_daily_bars
+
+    calls = []
+    page_dates = {
+        0: [13, 12, 11, 10, 9],
+        5: [8, 7, 6, 5, 4],
+    }
+
+    def fake_tdx_kline(client, code, *, period, start, count, adjust, anchor_date):
+        calls.append({"start": start, "count": count})
+        bars = tuple(
+            SimpleNamespace(time=datetime(2026, 6, day, 15, 0))
+            for day in page_dates.get(start, [])
+        )
+        return SimpleNamespace(bars=bars)
+
+    bars, page_count = request_recent_daily_bars(
+        object(),
+        "sz000001",
+        count=5,
+        target_trade_date="20260612",
+        require_trading_activity=False,
+        max_count=10,
+        tdx_kline=fake_tdx_kline,
+        kline_bars=lambda series: series.bars,
+        get_value=lambda value, name, default=None: getattr(value, name, default),
+        bar_trade_date=lambda bar: bar.time.strftime("%Y%m%d"),
+    )
+
+    assert [bar.time.strftime("%Y%m%d") for bar in bars] == [
+        "20260611",
+        "20260610",
+        "20260609",
+        "20260608",
+        "20260607",
+    ]
+    assert page_count == 2
+    assert calls == [{"start": 0, "count": 5}, {"start": 5, "count": 5}]
+
+
+def test_recent_daily_bars_uses_latest_unique_actual_trading_days():
+    from axdata_source_tdx.series_history import request_recent_daily_bars
+
+    bars_by_start = {
+        0: [
+            (12, 100),
+            (11, 500),
+            (11, 500),
+            (10, 0),
+            (9, 400),
+        ],
+        5: [(8, 300), (7, 200), (6, 100)],
+    }
+
+    def fake_tdx_kline(client, code, *, period, start, count, adjust, anchor_date):
+        bars = tuple(
+            SimpleNamespace(
+                time=datetime(2026, 6, day, 15, 0),
+                volume_lots=volume,
+                amount=float(volume) * 1000,
+            )
+            for day, volume in bars_by_start.get(start, [])
+        )
+        return SimpleNamespace(bars=bars)
+
+    bars, page_count = request_recent_daily_bars(
+        object(),
+        "sz000001",
+        count=5,
+        target_trade_date="20260612",
+        require_trading_activity=True,
+        max_count=10,
+        tdx_kline=fake_tdx_kline,
+        kline_bars=lambda series: series.bars,
+        get_value=lambda value, name, default=None: getattr(value, name, default),
+        bar_trade_date=lambda bar: bar.time.strftime("%Y%m%d"),
+    )
+
+    assert [bar.time.strftime("%Y%m%d") for bar in bars] == [
+        "20260611",
+        "20260609",
+        "20260608",
+        "20260607",
+        "20260606",
+    ]
+    assert page_count == 2
+
+
+def test_auction_indicator_stats_alignment_handles_same_and_previous_trade_date():
+    from axdata_source_tdx.derived_rows import auction_indicator_stats_alignment
+
+    row = SimpleNamespace(
+        stats_date="20260612",
+        amount_10k=310.0,
+        seal_amount_10k=31.0,
+        prev_amount_10k=220.0,
+        prev_seal_amount_10k=22.0,
+        prev2_seal_amount_10k=11.0,
+        open_volume_hand=130.0,
+        prev_open_volume_hand=120.0,
+        open_amount_10k=90.0,
+        prev_open_amount_10k=80.0,
+    )
+
+    same_day = auction_indicator_stats_alignment(
+        row,
+        target_trade_date="20260612",
+        previous_trade_date="20260611",
+    )
+    assert same_day == {
+        "status": "same_day",
+        "prev_amount_10k": 220.0,
+        "prev_seal_amount_10k": 22.0,
+        "prev2_seal_amount_10k": 11.0,
+        "prev_open_volume_hand": 120.0,
+        "prev_open_amount_10k": 80.0,
+    }
+
+    previous_day = auction_indicator_stats_alignment(
+        row,
+        target_trade_date="20260613",
+        previous_trade_date="20260612",
+    )
+    assert previous_day == {
+        "status": "previous_trading_day",
+        "prev_amount_10k": 310.0,
+        "prev_seal_amount_10k": 31.0,
+        "prev2_seal_amount_10k": 22.0,
+        "prev_open_volume_hand": 130.0,
+        "prev_open_amount_10k": 90.0,
+    }
+
+
+def test_auction_indicator_stats_alignment_rejects_unaligned_date():
+    from axdata_source_tdx.derived_rows import auction_indicator_stats_alignment
+
+    alignment = auction_indicator_stats_alignment(
+        SimpleNamespace(stats_date="20260610"),
+        target_trade_date="20260613",
+        previous_trade_date="20260612",
+    )
+
+    assert alignment["status"] == "stats_date_unaligned"
+    assert all(value is None for key, value in alignment.items() if key != "status")
+
+
+def test_tdx_stats_resource_uses_dominant_date_instead_of_first_row():
+    from axdata_source_tdx.stats_models import stats_resource_from_lines
+
+    stat_lines = [
+        _minimal_stat_line("20260610"),
+        _minimal_stat_line_for_code("20260612", "000002"),
+        _minimal_stat_line_for_code("20260612", "000003"),
+    ]
+    stat2_lines = [
+        _minimal_stat2_line("20260610", prev_amount="100.00"),
+        _minimal_stat2_line_for_code("20260612", "000002"),
+        _minimal_stat2_line_for_code("20260612", "000003"),
+    ]
+
+    resource = stats_resource_from_lines(
+        stat_lines,
+        stat2_lines,
+        source_path="test",
+    )
+
+    assert resource.stats_date == "20260612"
+    assert resource.stats_date_counts == {"20260610": 2, "20260612": 4}
+    assert resource.stats_date_coverage == pytest.approx(4 / 6)
+
+
+def test_market_date_context_uses_exchange_calendar_and_tdx_handshake():
+    from axdata_source_tdx.market_dates import resolve_market_date_context
+
+    handshake = SimpleNamespace(
+        server_datetime=datetime(2026, 6, 12, 9, 25, tzinfo=ZoneInfo("Asia/Shanghai")),
+        server_date_1=date(2026, 6, 12),
+        server_date_2=date(2026, 6, 12),
+    )
+    client = SimpleNamespace(transport=SimpleNamespace(last_handshake=handshake))
+
+    def fake_request_interface(interface_name, *, params, fields, persist):
+        assert interface_name == "stock_trade_calendar_exchange"
+        return SimpleNamespace(
+            records=[
+                {"cal_date": "20260611", "is_open": 1, "pretrade_date": "20260610"},
+                {"cal_date": "20260612", "is_open": 1, "pretrade_date": "20260611"},
+            ]
+        )
+
+    context = resolve_market_date_context(
+        client,
+        request_interface=fake_request_interface,
+    )
+
+    assert context.target_trade_date == "20260612"
+    assert context.previous_trade_date == "20260611"
+    assert context.phase == "trading"
+    assert context.ready is True
+    assert context.source == "exchange_calendar+tdx_handshake"
+
+
+def test_market_date_context_blocks_preauction_and_unconfirmed_handshake():
+    from axdata_source_tdx.market_dates import resolve_market_date_context
+
+    def calendar(interface_name, *, params, fields, persist):
+        return SimpleNamespace(
+            records=[
+                {"cal_date": "20260611", "is_open": 1, "pretrade_date": "20260610"},
+                {"cal_date": "20260612", "is_open": 1, "pretrade_date": "20260611"},
+            ]
+        )
+
+    preauction = SimpleNamespace(
+        server_datetime=datetime(2026, 6, 12, 9, 24, tzinfo=ZoneInfo("Asia/Shanghai")),
+        server_date_1=date(2026, 6, 11),
+        server_date_2=date(2026, 6, 11),
+    )
+    preauction_context = resolve_market_date_context(
+        SimpleNamespace(transport=SimpleNamespace(last_handshake=preauction)),
+        request_interface=calendar,
+    )
+    assert preauction_context.phase == "pre_auction"
+    assert preauction_context.ready is False
+
+    unconfirmed = SimpleNamespace(
+        server_datetime=datetime(2026, 6, 12, 9, 26, tzinfo=ZoneInfo("Asia/Shanghai")),
+        server_date_1=date(2026, 6, 11),
+        server_date_2=date(2026, 6, 11),
+    )
+    unconfirmed_context = resolve_market_date_context(
+        SimpleNamespace(transport=SimpleNamespace(last_handshake=unconfirmed)),
+        request_interface=calendar,
+    )
+    assert unconfirmed_context.phase == "market_date_unconfirmed"
+    assert unconfirmed_context.ready is False
+
+
+def test_market_date_context_uses_last_open_day_when_market_is_closed():
+    from axdata_source_tdx.market_dates import resolve_market_date_context
+
+    handshake = SimpleNamespace(
+        server_datetime=datetime(2026, 6, 13, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        server_date_1=date(2026, 6, 12),
+        server_date_2=date(2026, 6, 12),
+    )
+
+    def calendar(interface_name, *, params, fields, persist):
+        return SimpleNamespace(
+            records=[
+                {"cal_date": "20260611", "is_open": "1", "pretrade_date": "20260610"},
+                {"cal_date": "20260612", "is_open": "1", "pretrade_date": "20260611"},
+                {"cal_date": "20260613", "is_open": "0", "pretrade_date": "20260612"},
+            ]
+        )
+
+    context = resolve_market_date_context(
+        SimpleNamespace(transport=SimpleNamespace(last_handshake=handshake)),
+        request_interface=calendar,
+    )
+
+    assert context.target_trade_date == "20260612"
+    assert context.previous_trade_date == "20260611"
+    assert context.phase == "closed"
+    assert context.ready is True
+
+
+def test_market_date_context_reuses_calendar_rows_within_process(monkeypatch):
+    import axdata_core.source_request as source_request_module
+    from axdata_source_tdx import market_dates
+
+    monkeypatch.setattr(market_dates, "_CALENDAR_ROWS_BY_DATE", {})
+    calls = []
+
+    def calendar(interface_name, *, params, fields, persist):
+        calls.append(interface_name)
+        return SimpleNamespace(
+            records=[
+                {"cal_date": "20260611", "is_open": 1, "pretrade_date": "20260610"},
+                {"cal_date": "20260612", "is_open": 1, "pretrade_date": "20260611"},
+            ]
+        )
+
+    monkeypatch.setattr(source_request_module, "request_interface", calendar)
+    handshake = SimpleNamespace(
+        server_datetime=datetime(2026, 6, 12, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+        server_date_1=date(2026, 6, 12),
+        server_date_2=date(2026, 6, 12),
+    )
+    client = SimpleNamespace(transport=SimpleNamespace(last_handshake=handshake))
+
+    first = market_dates.resolve_market_date_context(client)
+    second = market_dates.resolve_market_date_context(client)
+
+    assert first == second
+    assert calls == ["stock_trade_calendar_exchange"]
+
+
+def test_market_date_context_fallback_still_blocks_before_auction():
+    from axdata_source_tdx.market_dates import resolve_market_date_context
+
+    handshake = SimpleNamespace(
+        server_datetime=datetime(2026, 6, 12, 9, 24, tzinfo=ZoneInfo("Asia/Shanghai")),
+        server_date_1=date(2026, 6, 12),
+        server_date_2=date(2026, 6, 12),
+    )
+
+    def unavailable_calendar(*args, **kwargs):
+        raise OSError("calendar unavailable")
+
+    context = resolve_market_date_context(
+        SimpleNamespace(transport=SimpleNamespace(last_handshake=handshake)),
+        request_interface=unavailable_calendar,
+    )
+
+    assert context.target_trade_date == "20260612"
+    assert context.phase == "pre_auction_fallback"
+    assert context.ready is False
+
+
 def test_tdx_adapter_requests_stock_auction_indicators(tmp_path):
     stats_root = tmp_path / "tdxstats"
     stats_root.mkdir()
@@ -4647,11 +4991,16 @@ def test_tdx_adapter_requests_stock_auction_indicators(tmp_path):
     stat2_parts[0] = "0"
     stat2_parts[1] = "000001"
     stat2_parts[2] = "20260612"
-    stat2_parts[3] = "200.00"
-    stat2_parts[4] = "50.00"
-    stat2_parts[6] = "40.00"
-    stat2_parts[9] = "150"
-    stat2_parts[14] = "80.00"
+    stat2_parts[3] = "250.00"
+    stat2_parts[4] = "25.00"
+    stat2_parts[5] = "200.00"
+    stat2_parts[6] = "50.00"
+    stat2_parts[7] = "180.00"
+    stat2_parts[8] = "40.00"
+    stat2_parts[9] = "10"
+    stat2_parts[10] = "150"
+    stat2_parts[14] = "1.00"
+    stat2_parts[15] = "80.00"
     (stats_root / "tdxstat.cfg").write_text("|".join(stat_parts), encoding="gbk")
     (stats_root / "tdxstat2.cfg").write_text("|".join(stat2_parts), encoding="gbk")
 
@@ -4674,10 +5023,10 @@ def test_tdx_adapter_requests_stock_auction_indicators(tmp_path):
                     high=10.2,
                     low=9.8,
                     close=10.1,
-                    volume_lots=2400.0,
+                    volume_lots=12000.0 if day == 12 else 2400.0,
                     amount=2400000.0,
                 )
-                for day in [8, 9, 10, 11, 12]
+                for day in [7, 8, 9, 10, 11, 12]
             )
             return SimpleNamespace(
                 exchange=code[:2],
@@ -4747,6 +5096,88 @@ def test_tdx_adapter_requests_stock_auction_indicators(tmp_path):
     assert adapter.last_meta["tdx_stats_refreshed"] is False
 
 
+def test_tdx_auction_indicators_previous_date_resource_uses_c0_and_includes_s(
+    monkeypatch,
+    tmp_path,
+):
+    stats_root = tmp_path / "tdxstats"
+    stats_root.mkdir()
+    stat_parts = [""] * 35
+    stat_parts[0] = "0"
+    stat_parts[1] = "000001"
+    stat_parts[4] = "20260611"
+    stat_parts[11] = "200.00"
+    stat2_parts = [""] * 21
+    stat2_parts[0] = "0"
+    stat2_parts[1] = "000001"
+    stat2_parts[2] = "20260611"
+    stat2_parts[3] = "300.00"
+    stat2_parts[4] = "30.00"
+    stat2_parts[5] = "200.00"
+    stat2_parts[6] = "50.00"
+    stat2_parts[7] = "180.00"
+    stat2_parts[8] = "40.00"
+    stat2_parts[9] = "10"
+    stat2_parts[10] = "150"
+    stat2_parts[14] = "90.00"
+    stat2_parts[15] = "80.00"
+    (stats_root / "tdxstat.cfg").write_text("|".join(stat_parts), encoding="gbk")
+    (stats_root / "tdxstat2.cfg").write_text("|".join(stat2_parts), encoding="gbk")
+
+    class PreviousDateKlineClient(FakeTdxClient):
+        def get_kline(
+            self,
+            code,
+            *,
+            period="day",
+            start=0,
+            count=800,
+            adjust=None,
+            anchor_date=None,
+        ):
+            bars = tuple(
+                SimpleNamespace(
+                    time=datetime(2026, 6, day, 15, 0, tzinfo=timezone(timedelta(hours=8))),
+                    volume_lots=12000.0 if day == 11 else 2400.0,
+                    amount=2400000.0,
+                )
+                for day in [5, 8, 9, 10, 11, 12]
+            )
+            return SimpleNamespace(bars=bars)
+
+    monkeypatch.setattr(
+        "axdata_source_tdx.market_dates.resolve_market_date_context",
+        lambda *args, **kwargs: SimpleNamespace(
+            target_trade_date="20260612",
+            previous_trade_date="20260611",
+            server_datetime=None,
+            phase="trading",
+            ready=True,
+            source="test_calendar",
+        ),
+    )
+    adapter = TdxRequestAdapter(client=PreviousDateKlineClient())
+
+    rows = adapter.request(
+        "stock_shortline_indicators_tdx",
+        {"code": "000001.SZ", "stats_root": str(stats_root)},
+    )
+
+    row = rows[0]
+    assert row["stats_date"] == "20260611"
+    assert row["prev_amount"] == 3000000.0
+    assert row["prev_seal_amount"] == 300000.0
+    assert row["prev2_seal_amount"] == 500000.0
+    assert row["prev_open_volume_hand"] == 10.0
+    assert row["prev_open_amount"] == 900000.0
+    assert row["open_prev_amount_ratio"] == 0.333333
+    assert row["open_volume_ratio"] == 0.548426
+    assert adapter.last_meta["tdx_stats_alignment_counts"] == {
+        "previous_trading_day": 1
+    }
+    assert adapter.last_meta["partial"] is False
+
+
 def test_tdx_adapter_refreshes_stock_auction_indicator_stats_from_source(monkeypatch, tmp_path):
     stats_cache = tmp_path / "stats-cache"
     monkeypatch.setenv("AXDATA_TDX_STATS_ROOT", str(stats_cache))
@@ -4763,10 +5194,14 @@ def test_tdx_adapter_refreshes_stock_auction_indicator_stats_from_source(monkeyp
     stat2_parts[0] = "0"
     stat2_parts[1] = "000001"
     stat2_parts[2] = "20260612"
-    stat2_parts[3] = "200.00"
-    stat2_parts[4] = "50.00"
-    stat2_parts[9] = "150"
-    stat2_parts[14] = "80.00"
+    stat2_parts[3] = "250.00"
+    stat2_parts[4] = "25.00"
+    stat2_parts[5] = "200.00"
+    stat2_parts[6] = "50.00"
+    stat2_parts[9] = "10"
+    stat2_parts[10] = "150"
+    stat2_parts[14] = "1.00"
+    stat2_parts[15] = "80.00"
 
     class FiveDayKlineClient(FakeTdxClient):
         def get_kline(self, code, *, period="day", start=0, count=800, adjust=None, anchor_date=None):
@@ -4790,7 +5225,7 @@ def test_tdx_adapter_refreshes_stock_auction_indicator_stats_from_source(monkeyp
                     volume_lots=2400.0,
                     amount=2400000.0,
                 )
-                for day in [8, 9, 10, 11, 12]
+                for day in [7, 8, 9, 10, 11, 12]
             )
             return SimpleNamespace(
                 exchange=code[:2],
@@ -4819,8 +5254,8 @@ def test_tdx_adapter_refreshes_stock_auction_indicator_stats_from_source(monkeyp
     metadata = json.loads(default_tdx_stats_metadata_path().read_text(encoding="utf-8"))
     assert metadata["stats_date"] == "20260612"
     assert metadata["size_bytes"] == len(client.resource_payloads["zhb.zip"])
-    assert metadata["stat_rows"] == 1
-    assert metadata["stat2_rows"] == 1
+    assert metadata["stat_rows"] == 1000
+    assert metadata["stat2_rows"] == 1000
     assert rows[0]["stats_date"] == "20260612"
     assert rows[0]["open_prev_amount_ratio"] == 0.5
     assert adapter.last_meta["tdx_stats_source_path"] == str(default_tdx_stats_resource_path())
@@ -4844,8 +5279,8 @@ def test_tdx_stats_resource_request_downloads_without_cache_writes(tmp_path):
     assert resource.metadata is not None
     assert resource.metadata["cache_path"] is None
     assert resource.metadata["size_bytes"] == len(payload)
-    assert resource.metadata["stat_rows"] == 1
-    assert resource.metadata["stat2_rows"] == 1
+    assert resource.metadata["stat_rows"] == 1000
+    assert resource.metadata["stat2_rows"] == 1000
     assert not tmp_path.joinpath("zhb.zip").exists()
 
 
@@ -4862,10 +5297,14 @@ def test_tdx_adapter_reuses_same_day_stock_auction_indicator_stats_cache(monkeyp
     stat2_parts[0] = "0"
     stat2_parts[1] = "000001"
     stat2_parts[2] = "20260612"
-    stat2_parts[3] = "200.00"
-    stat2_parts[4] = "50.00"
-    stat2_parts[9] = "150"
-    stat2_parts[14] = "80.00"
+    stat2_parts[3] = "250.00"
+    stat2_parts[4] = "25.00"
+    stat2_parts[5] = "200.00"
+    stat2_parts[6] = "50.00"
+    stat2_parts[9] = "10"
+    stat2_parts[10] = "150"
+    stat2_parts[14] = "1.00"
+    stat2_parts[15] = "80.00"
     payload = _stats_zip_bytes("|".join(stat_parts), "|".join(stat2_parts))
     default_tdx_stats_resource_path().write_bytes(payload)
     default_tdx_stats_metadata_path().write_text(
@@ -4892,7 +5331,7 @@ def test_tdx_adapter_reuses_same_day_stock_auction_indicator_stats_cache(monkeyp
                     volume_lots=2400.0,
                     amount=2400000.0,
                 )
-                for day in [8, 9, 10, 11, 12]
+                for day in [7, 8, 9, 10, 11, 12]
             )
             return SimpleNamespace(
                 exchange=code[:2],
@@ -4914,18 +5353,200 @@ def test_tdx_adapter_reuses_same_day_stock_auction_indicator_stats_cache(monkeyp
     assert adapter.last_meta["tdx_stats_date"] == "20260612"
 
 
-def test_tdx_adapter_refreshes_previous_day_stock_auction_indicator_stats_cache(monkeypatch, tmp_path):
+def test_tdx_stats_cache_reuses_previous_trade_date_without_downloading(tmp_path):
+    from axdata_source_tdx.stats_resource import ensure_tdx_stats_resource
+
+    stats_cache = tmp_path / "stats-cache"
+    stats_cache.mkdir()
+    payload = _stats_zip_bytes(
+        _minimal_stat_line("20260611"),
+        _minimal_stat2_line("20260611", prev_amount="100.00"),
+    )
+    (stats_cache / "zhb.zip").write_bytes(payload)
+    client = FakeTdxClient()
+
+    resource, refreshed = ensure_tdx_stats_resource(
+        client,
+        cache_root=stats_cache,
+        target_trade_date="20260612",
+        previous_trade_date="20260611",
+    )
+
+    assert resource.stats_date == "20260611"
+    assert refreshed is False
+    assert client.download_file_calls == []
+
+
+def test_tdx_stats_cache_replaces_incomplete_cache_only_after_valid_download(tmp_path):
+    from axdata_source_tdx.stats_resource import ensure_tdx_stats_resource
+
+    stats_cache = tmp_path / "stats-cache"
+    stats_cache.mkdir()
+    incomplete = _stats_zip_bytes(
+        _minimal_stat_line("20260610"),
+        _minimal_stat2_line("20260610", prev_amount="100.00"),
+        minimum_rows=None,
+    )
+    valid = _stats_zip_bytes(
+        _minimal_stat_line("20260612"),
+        _minimal_stat2_line("20260612", prev_amount="200.00"),
+    )
+    (stats_cache / "zhb.zip").write_bytes(incomplete)
+    client = FakeTdxClient()
+    client.resource_payloads["zhb.zip"] = valid
+
+    resource, refreshed = ensure_tdx_stats_resource(
+        client,
+        cache_root=stats_cache,
+        target_trade_date="20260612",
+        previous_trade_date="20260611",
+    )
+
+    assert resource.stats_date == "20260612"
+    assert refreshed is True
+    assert (stats_cache / "zhb.zip").read_bytes() == valid
+
+
+def test_tdx_stats_cache_preserves_old_file_and_defers_after_bad_refresh(tmp_path):
+    from axdata_source_tdx.stats_errors import (
+        TdxStatsRefreshDeferredError,
+        TdxStatsValidationError,
+    )
+    from axdata_source_tdx.stats_resource import ensure_tdx_stats_resource
+
+    stats_cache = tmp_path / "stats-cache"
+    stats_cache.mkdir()
+    stale = _stats_zip_bytes(
+        _minimal_stat_line("20260610"),
+        _minimal_stat2_line("20260610", prev_amount="100.00"),
+    )
+    bad_download = _stats_zip_bytes(
+        _minimal_stat_line("20260612"),
+        _minimal_stat2_line("20260612", prev_amount="200.00"),
+        minimum_rows=None,
+    )
+    (stats_cache / "zhb.zip").write_bytes(stale)
+    client = FakeTdxClient()
+    client.resource_payloads["zhb.zip"] = bad_download
+
+    with pytest.raises(TdxStatsValidationError, match="expected at least 1000 rows"):
+        ensure_tdx_stats_resource(
+            client,
+            cache_root=stats_cache,
+            target_trade_date="20260612",
+            previous_trade_date="20260611",
+        )
+
+    assert (stats_cache / "zhb.zip").read_bytes() == stale
+    assert len(client.download_file_calls) == 1
+    metadata = json.loads((stats_cache / "zhb.meta.json").read_text(encoding="utf-8"))
+    assert metadata["last_refresh_error_code"] == "TDX_STATS_RESOURCE_INVALID"
+
+    with pytest.raises(TdxStatsRefreshDeferredError) as exc_info:
+        ensure_tdx_stats_resource(
+            client,
+            cache_root=stats_cache,
+            target_trade_date="20260612",
+            previous_trade_date="20260611",
+        )
+
+    assert exc_info.value.code == "TDX_STATS_REFRESH_DEFERRED"
+    assert exc_info.value.details["retry_after_seconds"] > 0
+    assert len(client.download_file_calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "error_match"),
+    [
+        ("bad_zip", "not a valid ZIP"),
+        ("old_date", "has not published a resource usable"),
+    ],
+)
+def test_tdx_stats_refresh_preserves_usable_cache_on_bad_zip_or_old_date(
+    tmp_path,
+    failure_kind,
+    error_match,
+):
+    from axdata_source_tdx.stats_errors import TdxStatsError
+    from axdata_source_tdx.stats_resource import ensure_tdx_stats_resource
+
+    stats_cache = tmp_path / "stats-cache"
+    stats_cache.mkdir()
+    usable = _stats_zip_bytes(
+        _minimal_stat_line("20260611"),
+        _minimal_stat2_line("20260611", prev_amount="100.00"),
+    )
+    (stats_cache / "zhb.zip").write_bytes(usable)
+    client = FakeTdxClient()
+    download_payload = b"not-a-zip"
+    if failure_kind == "old_date":
+        download_payload = _stats_zip_bytes(
+            _minimal_stat_line("20260610"),
+            _minimal_stat2_line("20260610", prev_amount="100.00"),
+        )
+    client.resource_payloads["zhb.zip"] = download_payload
+
+    with pytest.raises(TdxStatsError, match=error_match):
+        ensure_tdx_stats_resource(
+            client,
+            cache_root=stats_cache,
+            refresh=True,
+            target_trade_date="20260612",
+            previous_trade_date="20260611",
+        )
+
+    assert (stats_cache / "zhb.zip").read_bytes() == usable
+
+
+def test_tdx_stats_resource_reuses_parsed_resource_in_process(tmp_path):
+    from axdata_source_tdx.stats_resource import load_tdx_stats_resource
+
+    stats_zip = tmp_path / "zhb.zip"
+    stats_zip.write_bytes(
+        _stats_zip_bytes(
+            _minimal_stat_line("20260612"),
+            _minimal_stat2_line("20260612", prev_amount="200.00"),
+        )
+    )
+
+    first = load_tdx_stats_resource(stats_zip)
+    second = load_tdx_stats_resource(stats_zip)
+
+    assert second is first
+
+
+def test_tdx_direct_adapter_default_stats_cache_is_independent_of_cwd(monkeypatch, tmp_path):
+    from axdata_source_tdx.stats_cache import default_tdx_stats_cache_root
+
+    local_app_data = tmp_path / "local-app-data"
+    first_cwd = tmp_path / "first"
+    second_cwd = tmp_path / "second"
+    first_cwd.mkdir()
+    second_cwd.mkdir()
+    monkeypatch.delenv("AXDATA_TDX_STATS_ROOT", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+
+    monkeypatch.chdir(first_cwd)
+    first = default_tdx_stats_cache_root()
+    monkeypatch.chdir(second_cwd)
+    second = default_tdx_stats_cache_root()
+
+    assert first == second
+    assert first == (local_app_data / "AxData" / "cache" / "tdx" / "stats").resolve()
+
+
+def test_tdx_adapter_refreshes_stats_cache_older_than_previous_trade_date(monkeypatch, tmp_path):
     stats_cache = tmp_path / "stats-cache"
     monkeypatch.setenv("AXDATA_TDX_STATS_ROOT", str(stats_cache))
     stats_cache.mkdir()
-    old_payload = _stats_zip_bytes(_minimal_stat_line("20260611"), _minimal_stat2_line("20260611", prev_amount="100.00"))
+    old_payload = _stats_zip_bytes(_minimal_stat_line("20260610"), _minimal_stat2_line("20260610", prev_amount="100.00"))
     new_payload = _stats_zip_bytes(_minimal_stat_line("20260612"), _minimal_stat2_line("20260612", prev_amount="200.00"))
     default_tdx_stats_resource_path().write_bytes(old_payload)
     default_tdx_stats_metadata_path().write_text(
         json.dumps(
             {
                 "downloaded_at": (datetime.now(ZoneInfo("Asia/Shanghai")) - timedelta(days=1)).isoformat(timespec="seconds"),
-                "stats_date": "20260611",
+                "stats_date": "20260610",
                 "size_bytes": len(old_payload),
             },
             ensure_ascii=False,
@@ -4958,6 +5579,17 @@ def test_tdx_adapter_refreshes_previous_day_stock_auction_indicator_stats_cache(
     client = FiveDayKlineClient()
     client.resource_payloads["zhb.zip"] = new_payload
     adapter = TdxRequestAdapter(client=client)
+    monkeypatch.setattr(
+        "axdata_source_tdx.market_dates.resolve_market_date_context",
+        lambda *args, **kwargs: SimpleNamespace(
+            target_trade_date="20260612",
+            previous_trade_date="20260611",
+            server_datetime=None,
+            phase="trading",
+            ready=True,
+            source="test_calendar",
+        ),
+    )
 
     rows = adapter.request("stock_shortline_indicators_tdx", {"code": "000001.SZ"})
 
@@ -5632,11 +6264,52 @@ def test_tdx_adapter_requests_stock_daily_price_limit_marks_no_price_limit_for_n
     assert rows[0]["limit_status"] == "no_price_limit"
 
 
-def _stats_zip_bytes(stat_text: str, stat2_text: str) -> bytes:
+def _stats_zip_bytes(
+    stat_text: str,
+    stat2_text: str,
+    *,
+    minimum_rows: int | None = 1000,
+) -> bytes:
+    stat_lines = stat_text.splitlines()
+    stat2_lines = stat2_text.splitlines()
+    if minimum_rows is not None:
+        stat_date = next(
+            (parts[4] for line in stat_lines if len(parts := line.split("|")) > 4 and parts[4]),
+            "20260612",
+        )
+        stat2_date = next(
+            (parts[2] for line in stat2_lines if len(parts := line.split("|")) > 2 and parts[2]),
+            stat_date,
+        )
+        existing_keys = {
+            (parts[0], parts[1])
+            for line in (*stat_lines, *stat2_lines)
+            if len(parts := line.split("|")) > 1
+        }
+        candidate = 100000
+        while len(stat_lines) < minimum_rows or len(stat2_lines) < minimum_rows:
+            code = f"{candidate:06d}"
+            candidate += 1
+            if ("0", code) in existing_keys:
+                continue
+            existing_keys.add(("0", code))
+            stat_parts = [""] * 35
+            stat_parts[0] = "0"
+            stat_parts[1] = code
+            stat_parts[4] = stat_date
+            stat2_parts = [""] * 21
+            stat2_parts[0] = "0"
+            stat2_parts[1] = code
+            stat2_parts[2] = stat2_date
+            if len(stat_lines) < minimum_rows:
+                stat_lines.append("|".join(stat_parts))
+            if len(stat2_lines) < minimum_rows:
+                stat2_lines.append("|".join(stat2_parts))
+
     buffer = BytesIO()
     with ZipFile(buffer, "w") as archive:
-        archive.writestr("tdxstat.cfg", stat_text.encode("gbk"))
-        archive.writestr("tdxstat2.cfg", stat2_text.encode("gbk"))
+        archive.writestr("tdxstat.cfg", "\n".join(stat_lines).encode("gbk"))
+        archive.writestr("tdxstat2.cfg", "\n".join(stat2_lines).encode("gbk"))
     return buffer.getvalue()
 
 
@@ -5653,15 +6326,33 @@ def _minimal_stat_line(stats_date: str) -> str:
     return "|".join(parts)
 
 
+def _minimal_stat_line_for_code(stats_date: str, code: str) -> str:
+    parts = _minimal_stat_line(stats_date).split("|")
+    parts[1] = code
+    return "|".join(parts)
+
+
 def _minimal_stat2_line(stats_date: str, *, prev_amount: str) -> str:
     parts = [""] * 21
     parts[0] = "0"
     parts[1] = "000001"
     parts[2] = stats_date
-    parts[3] = prev_amount
-    parts[4] = "50.00"
-    parts[9] = "150"
-    parts[14] = "80.00"
+    parts[3] = "250.00"
+    parts[4] = "25.00"
+    parts[5] = prev_amount
+    parts[6] = "50.00"
+    parts[7] = "180.00"
+    parts[8] = "40.00"
+    parts[9] = "10"
+    parts[10] = "150"
+    parts[14] = "1.00"
+    parts[15] = "80.00"
+    return "|".join(parts)
+
+
+def _minimal_stat2_line_for_code(stats_date: str, code: str) -> str:
+    parts = _minimal_stat2_line(stats_date, prev_amount="200.00").split("|")
+    parts[1] = code
     return "|".join(parts)
 
 

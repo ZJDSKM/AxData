@@ -206,17 +206,20 @@ def request_recent_daily_bars(
     tdx_code: str,
     *,
     count: int,
-    stats_date: Any,
+    target_trade_date: Any,
+    require_trading_activity: bool,
     max_count: int,
     tdx_kline: Callable[..., Any],
     kline_bars: Callable[[Any], Sequence[Any]],
     get_value: Callable[[Any, str, Any], Any],
     bar_trade_date: Callable[[Any], str | None],
 ) -> tuple[list[Any], int]:
-    stats_date_text = str(stats_date or "")
+    target_trade_date_text = str(target_trade_date or "")
     page_size = max(1, int(count))
     current_start = 0
     page_count = 0
+    recent_bars: list[Any] = []
+    seen_dates: set[str] = set()
 
     while current_start <= max_count:
         series = tdx_kline(
@@ -233,28 +236,43 @@ def request_recent_daily_bars(
         if not bars:
             break
 
-        filtered: list[Any] = []
-        has_base_bar = False
         for bar in bars:
             trade_date = bar_trade_date(bar)
-            if stats_date_text and trade_date and trade_date > stats_date_text:
+            if not trade_date:
                 continue
-            filtered.append(bar)
-            if stats_date_text and trade_date and trade_date < stats_date_text:
-                has_base_bar = True
-            if len(filtered) >= 5:
-                return filtered, page_count
+            if target_trade_date_text and trade_date >= target_trade_date_text:
+                continue
+            if trade_date in seen_dates:
+                continue
+            if require_trading_activity and not _bar_has_trading_activity(bar, get_value=get_value):
+                continue
+            seen_dates.add(trade_date)
+            recent_bars.append(bar)
+            if len(recent_bars) >= 5:
+                return recent_bars, page_count
 
-        oldest_date = bar_trade_date(bars[-1])
-        if filtered and (not stats_date_text or has_base_bar):
-            return filtered, page_count
-        if stats_date_text and oldest_date and oldest_date < stats_date_text:
-            break
         if len(bars) < page_size:
             break
         current_start += len(bars)
 
-    return [], page_count
+    return recent_bars, page_count
+
+
+def _bar_has_trading_activity(
+    bar: Any,
+    *,
+    get_value: Callable[[Any, str, Any], Any],
+) -> bool:
+    for name in ("volume_lots", "volume", "amount"):
+        value = get_value(bar, name, None)
+        if value in (None, ""):
+            continue
+        try:
+            if float(value) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
 
 
 def request_kline_codes_on_host(

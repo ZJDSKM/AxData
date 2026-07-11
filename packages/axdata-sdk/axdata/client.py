@@ -28,6 +28,19 @@ LOCAL_STREAM_MAX_CODES = 100
 class AxDataError(RuntimeError):
     """Raised when AxData returns an invalid or failed response."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        status_code: int | None = None,
+        details: Any = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.details = details
+
 
 class AxDataClient:
     """User-facing AxData client.
@@ -694,9 +707,21 @@ class AxDataClient:
             if isinstance(payload, Mapping):
                 error = payload.get("error")
                 if isinstance(error, Mapping) and error.get("message"):
-                    raise AxDataError(str(error["message"]))
+                    metadata = payload.get("meta")
+                    details = error.get("details")
+                    if details is None and isinstance(metadata, Mapping):
+                        details = metadata.get("error_details")
+                    raise AxDataError(
+                        str(error["message"]),
+                        code=str(error.get("code")) if error.get("code") else None,
+                        status_code=int(status_code),
+                        details=details,
+                    )
                 if payload.get("message") or payload.get("msg"):
-                    raise AxDataError(str(payload.get("message") or payload.get("msg")))
+                    raise AxDataError(
+                        str(payload.get("message") or payload.get("msg")),
+                        status_code=int(status_code),
+                    )
         response.raise_for_status()
 
     @staticmethod
@@ -714,10 +739,17 @@ class AxDataClient:
             error = data.get("error")
             if isinstance(error, Mapping):
                 message = error.get("message") or error.get("code")
+                code = str(error.get("code")) if error.get("code") else None
+                details = error.get("details")
             else:
                 message = data.get("message") or data.get("msg")
+                code = None
+                details = None
+            metadata = data.get("meta")
+            if details is None and isinstance(metadata, Mapping):
+                details = metadata.get("error_details")
             message = message or "AxData query failed"
-            raise AxDataError(str(message))
+            raise AxDataError(str(message), code=code, details=details)
 
         if isinstance(data.get("data"), list):
             records = data["data"]
@@ -744,9 +776,20 @@ class AxDataClient:
             error = data.get("error")
             if isinstance(error, Mapping):
                 message = error.get("message") or error.get("code")
+                code = str(error.get("code")) if error.get("code") else None
+                details = error.get("details")
             else:
                 message = data.get("message") or data.get("msg")
-            raise AxDataError(str(message or "AxData request failed"))
+                code = None
+                details = None
+            metadata = data.get("meta")
+            if details is None and isinstance(metadata, Mapping):
+                details = metadata.get("error_details")
+            raise AxDataError(
+                str(message or "AxData request failed"),
+                code=code,
+                details=details,
+            )
 
         payload = data.get("data")
         if not isinstance(payload, Mapping):
@@ -806,7 +849,11 @@ class AxDataStream:
         if isinstance(payload, Mapping) and payload.get("type") == "error":
             error = payload.get("error")
             if isinstance(error, Mapping) and error.get("message"):
-                raise AxDataError(str(error["message"]))
+                raise AxDataError(
+                    str(error["message"]),
+                    code=str(error.get("code")) if error.get("code") else None,
+                    details=error.get("details"),
+                )
         return SimpleNamespace(**payload)
 
     @property
@@ -897,7 +944,11 @@ class AxDataLocalSession:
             )
             session.open()
         except Exception as exc:
-            raise AxDataError(f"Failed to open local source session for {self.source!r}: {exc}") from exc
+            raise AxDataError(
+                f"Failed to open local source session for {self.source!r}: {exc}",
+                code=getattr(exc, "code", None),
+                details=getattr(exc, "details", None),
+            ) from exc
         self._session = session
 
     def close(self) -> None:
@@ -939,7 +990,11 @@ class AxDataLocalSession:
         except AxDataError:
             raise
         except Exception as exc:
-            raise AxDataError(f"Local source session call {interface!r} failed: {exc}") from exc
+            raise AxDataError(
+                f"Local source session call {interface!r} failed: {exc}",
+                code=getattr(exc, "code", None),
+                details=getattr(exc, "details", None),
+            ) from exc
         return self._client._to_dataframe(result.records)
 
 

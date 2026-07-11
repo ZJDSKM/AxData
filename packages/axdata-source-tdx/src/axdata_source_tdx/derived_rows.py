@@ -46,6 +46,8 @@ def normalize_auction_indicator_row(
     *,
     stat_row: Any | None,
     stat2_row: Any | None,
+    target_trade_date: Any,
+    previous_trade_date: Any,
     recent_daily_bars: Sequence[Any],
     finance_row: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -60,14 +62,20 @@ def normalize_auction_indicator_row(
     free_float_market_value = market_value(free_float_shares, last_price)
     float_shares = get_value(finance_row, "float_share") if finance_row else None
     float_market_value = market_value(float_shares, last_price)
-    prev_amount = tenk_yuan(get_value(stat2_row, "prev_amount_10k"))
-    prev_seal_amount = tenk_yuan(get_value(stat2_row, "prev_seal_amount_10k"))
-    prev2_seal_amount = tenk_yuan(get_value(stat2_row, "prev2_seal_amount_10k"))
-    prev_open_amount = tenk_yuan(get_value(stat2_row, "prev_open_amount_10k"))
-    prev_open_volume_hand = round_optional_float(get_value(stat2_row, "prev_open_volume_hand"))
+    aligned_stats = auction_indicator_stats_alignment(
+        stat2_row,
+        target_trade_date=target_trade_date,
+        previous_trade_date=previous_trade_date,
+    )
+    prev_amount = tenk_yuan(aligned_stats["prev_amount_10k"])
+    prev_seal_amount = tenk_yuan(aligned_stats["prev_seal_amount_10k"])
+    prev2_seal_amount = tenk_yuan(aligned_stats["prev2_seal_amount_10k"])
+    prev_open_amount = tenk_yuan(aligned_stats["prev_open_amount_10k"])
+    prev_open_volume_hand = round_optional_float(aligned_stats["prev_open_volume_hand"])
     limit_stat_days = optional_int(get_value(stat_row, "limit_stat_days"))
     limit_up_count = optional_int(get_value(stat_row, "limit_up_count_in_stat_days"))
     return {
+        "_indicator_status": aligned_stats["status"],
         "instrument_id": snapshot.get("instrument_id"),
         "symbol": snapshot.get("symbol"),
         "tdx_code": str(snapshot.get("tdx_code") or "").lower(),
@@ -102,6 +110,51 @@ def normalize_auction_indicator_row(
         "limit_board_text": limit_board_text(limit_stat_days, limit_up_count),
         "limit_up_streak_days": optional_int(get_value(stat_row, "limit_up_streak_days")),
         "year_limit_up_days": optional_int(get_value(stat_row, "year_limit_up_days")),
+    }
+
+
+def auction_indicator_stats_alignment(
+    stat2_row: Any | None,
+    *,
+    target_trade_date: Any,
+    previous_trade_date: Any,
+) -> dict[str, Any]:
+    stats_date = str(get_value(stat2_row, "stats_date") or "")
+    target_date = str(target_trade_date or "")
+    previous_date = str(previous_trade_date or "")
+    if stat2_row is None or not stats_date:
+        return _empty_auction_stats_alignment("stats_row_missing")
+    if not target_date or not previous_date:
+        return _empty_auction_stats_alignment("trade_date_unavailable")
+    if stats_date == target_date:
+        return {
+            "status": "same_day",
+            "prev_amount_10k": get_value(stat2_row, "prev_amount_10k"),
+            "prev_seal_amount_10k": get_value(stat2_row, "prev_seal_amount_10k"),
+            "prev2_seal_amount_10k": get_value(stat2_row, "prev2_seal_amount_10k"),
+            "prev_open_volume_hand": get_value(stat2_row, "prev_open_volume_hand"),
+            "prev_open_amount_10k": get_value(stat2_row, "prev_open_amount_10k"),
+        }
+    if stats_date == previous_date:
+        return {
+            "status": "previous_trading_day",
+            "prev_amount_10k": get_value(stat2_row, "amount_10k"),
+            "prev_seal_amount_10k": get_value(stat2_row, "seal_amount_10k"),
+            "prev2_seal_amount_10k": get_value(stat2_row, "prev_seal_amount_10k"),
+            "prev_open_volume_hand": get_value(stat2_row, "open_volume_hand"),
+            "prev_open_amount_10k": get_value(stat2_row, "open_amount_10k"),
+        }
+    return _empty_auction_stats_alignment("stats_date_unaligned")
+
+
+def _empty_auction_stats_alignment(status: str) -> dict[str, Any]:
+    return {
+        "status": status,
+        "prev_amount_10k": None,
+        "prev_seal_amount_10k": None,
+        "prev2_seal_amount_10k": None,
+        "prev_open_volume_hand": None,
+        "prev_open_amount_10k": None,
     }
 
 

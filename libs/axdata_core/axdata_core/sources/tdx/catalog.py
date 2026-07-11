@@ -2636,7 +2636,7 @@ INTERFACES: Dict[str, SourceRequestInterface] = {
                 dtype="string",
                 required=False,
                 description="Optional AxData statistics cache directory used by automatic refresh.",
-                description_zh="可选缓存目录：自动下载的 zhb.zip 和 zhb.meta.json 会保存到这里；不传时使用项目 cache/tdx/stats。",
+                description_zh="可选缓存目录：SDK/API 默认使用 data_root/cache/tdx/stats，直接适配器默认使用系统用户缓存；也可通过 AXDATA_TDX_STATS_ROOT 指定。",
             ),
             RequestParameter(
                 name="refresh_stats",
@@ -3769,7 +3769,7 @@ INTERFACES: Dict[str, SourceRequestInterface] = {
                 dtype="string",
                 required=False,
                 description="Optional AxData statistics cache directory used by automatic refresh.",
-                description_zh="可选缓存目录：自动下载的 zhb.zip 和 zhb.meta.json 会保存到这里；不传时使用项目 cache/tdx/stats。",
+                description_zh="可选缓存目录：SDK/API 默认使用 data_root/cache/tdx/stats，直接适配器默认使用系统用户缓存；也可通过 AXDATA_TDX_STATS_ROOT 指定。",
             ),
             RequestParameter(
                 name="refresh_stats",

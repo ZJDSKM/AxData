@@ -1715,7 +1715,8 @@ def _request_recent_daily_bars(
     tdx_code: str,
     *,
     count: int,
-    stats_date: Any,
+    target_trade_date: Any,
+    require_trading_activity: bool = False,
 ) -> tuple[list[Any], int]:
     from .normalize_utils import bar_trade_date, get_value
     from .request_params import TDX_KLINE_MAX_COUNT
@@ -1727,7 +1728,8 @@ def _request_recent_daily_bars(
         client,
         tdx_code,
         count=count,
-        stats_date=stats_date,
+        target_trade_date=target_trade_date,
+        require_trading_activity=require_trading_activity,
         max_count=TDX_KLINE_MAX_COUNT,
         tdx_kline=tdx_kline,
         kline_bars=kline_bars,
