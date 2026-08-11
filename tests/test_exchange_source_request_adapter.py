@@ -700,3 +700,56 @@ def test_exchange_adapter_stock_prbook_sse_normalizes_rows():
     assert row["actual_date"] == ""
     assert "commonSoaQuery.do" in opener.last_url
     assert "sqlId=SSE_SZSGG_DQBGYYQK_CAST_NEW" in opener.last_url
+
+
+class FakeEMOpener:
+    """东财 datacenter JSON 响应。"""
+
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.last_url = ""
+
+    def __call__(self, request, timeout):
+        self.last_url = request.full_url
+        return FakeTextResponse(json.dumps(self.payload))
+
+
+def test_exchange_adapter_stock_prbook_em_normalizes_rows():
+    """东财预约披露：沪深统一 + 日期归一化 + 报告类型映射（08-12 二期）。"""
+    opener = FakeEMOpener({"result": {"data": [
+        {"SECURITY_CODE": "000001", "REPORT_TYPE": "2", "REPORT_YEAR": "2026",
+         "FIRST_APPOINT_DATE": "2026-08-15 00:00:00", "FIRST_CHANGE_DATE": None,
+         "SECOND_CHANGE_DATE": None, "THIRD_CHANGE_DATE": None,
+         "ACTUAL_PUBLISH_DATE": None, "REPORT_TYPE_NAME": "半年报"},
+    ]}})
+    adapter = ExchangeRequestAdapter(opener=opener)
+    rows = adapter.request("stock_prbook_em", {"code": "000001"})
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["instrument_id"] == "000001.SZ"
+    assert row["exchange"] == "SZSE"
+    assert row["report_type"] == "半年报"
+    assert row["first_publish_date"] == "20260815"
+    assert row["actual_date"] == ""
+    assert "RPT_PUBLIC_BS_APPOIN" in opener.last_url
+
+
+def test_exchange_adapter_stock_performance_forecast_em_normalizes():
+    """东财业绩预告：净利润区间/变动幅度结构化（08-12 二期）。"""
+    opener = FakeEMOpener({"result": {"data": [
+        {"SECURITY_CODE": "002230", "NOTICE_DATE": "2026-07-15 00:00:00",
+         "REPORT_DATE": "2026-06-30 00:00:00", "PREDICT_FINANCE": "归属于上市公司股东的净利润",
+         "PREDICT_AMT_LOWER": 180000000.0, "PREDICT_AMT_UPPER": 228000000.0,
+         "ADD_AMP_LOWER": 5.0, "ADD_AMP_UPPER": 25.0,
+         "PREDICT_CONTENT": "预计2026年1-6月…净利润:18,000万元~22,800万元,同比增长:5%~25%"},
+    ]}})
+    adapter = ExchangeRequestAdapter(opener=opener)
+    rows = adapter.request("stock_performance_forecast_em", {"code": "002230"})
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["symbol"] == "002230"
+    assert row["notice_date"] == "20260715"
+    assert row["predict_amount_lower"] == 180000000.0
+    assert row["adjust_amp_lower"] == 5.0
+    assert row["adjust_amp_upper"] == 25.0
+    assert "2026年1-6月" in row["content"]

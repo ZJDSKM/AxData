@@ -28,10 +28,13 @@ SUPPORTED_INTERFACES = {
     "stock_historical_list_exchange",
     "stock_basic_info_exchange",
     "stock_prbook_sse",
+    "stock_prbook_em",
+    "stock_performance_forecast_em",
 }
 
 SSE_PRBOOK_URL = "https://query.sse.com.cn/commonSoaQuery.do"
 SSE_PRBOOK_SQL_ID = "SSE_SZSGG_DQBGYYQK_CAST_NEW"
+EM_DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 
 SZSE_CALENDAR_URL = "https://www.szse.cn/api/report/exchange/onepersistenthour/monthList"
 SSE_STOCK_LIST_URL = "https://query.sse.com.cn/sseQuery/commonQuery.do"
@@ -129,6 +132,10 @@ class ExchangeRequestAdapter:
             return self._request_stock_basic_info(params)
         if interface_name == "stock_prbook_sse":
             return self._request_stock_prbook_sse(params)
+        if interface_name == "stock_prbook_em":
+            return self._request_stock_prbook_em(params)
+        if interface_name == "stock_performance_forecast_em":
+            return self._request_stock_performance_forecast_em(params)
         raise SourceAdapterNotFound(
             f"Exchange source adapter does not support interface {interface_name!r}."
         )
@@ -343,6 +350,104 @@ class ExchangeRequestAdapter:
                 "actual_date": str(r.get("actualDate") or "").replace("-", ""),
             })
         return rows
+
+    def _request_stock_prbook_em(self, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """东财定期报告预约披露（沪深统一，08-12 二期）。
+
+        替代深交所逆向（szse.cn 页面无公开预约披露接口）；与
+        stock_prbook_sse 统一输出 schema。REPORT_TYPE: 1=一季报 2=半年报
+        3=三季报 4=年报。
+        """
+        code = str(params.get("code") or "").strip()
+        if not code:
+            raise SourceRequestValidationError("stock_prbook_em requires 'code'")
+        data = self._fetch_em_datacenter(
+            "RPT_PUBLIC_BS_APPOIN", code=code, page_size=20,
+            sort_columns="REPORT_DATE", sort_types=-1,
+        )
+        report_names = {"1": "一季报", "2": "半年报", "3": "三季报", "4": "年报"}
+        rows: list[dict[str, Any]] = []
+        for r in (data.get("result") or {}).get("data") or []:
+            bt = str(r.get("REPORT_TYPE") or "")
+            first = _normalize_em_date(r.get("FIRST_APPOINT_DATE"))
+            if not bt or not first:
+                continue
+            rows.append({
+                "instrument_id": f"{code}.{_code_exchange_suffix(code)}",
+                "symbol": code,
+                "exchange": _code_exchange_name(code),
+                "bulletin_type": bt,
+                "report_type": report_names.get(bt, str(r.get("REPORT_TYPE_NAME") or bt)),
+                "publish_year": str(r.get("REPORT_YEAR") or ""),
+                "first_publish_date": first,
+                "change_date_1": _normalize_em_date(r.get("FIRST_CHANGE_DATE")),
+                "change_date_2": _normalize_em_date(r.get("SECOND_CHANGE_DATE")),
+                "change_date_3": _normalize_em_date(r.get("THIRD_CHANGE_DATE")),
+                "actual_date": _normalize_em_date(r.get("ACTUAL_PUBLISH_DATE")),
+            })
+        return rows
+
+    def _request_stock_performance_forecast_em(
+        self, params: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """东财业绩预告（结构化：净利润区间/变动幅度，08-12 二期）。
+
+        按交易所规则仅业绩大幅变动公司披露预告；业绩平稳公司无记录
+        （如 600101 2026 中报无预告，7/22 业绩快报走公告标题识别）。
+        """
+        code = str(params.get("code") or "").strip()
+        if not code:
+            raise SourceRequestValidationError(
+                "stock_performance_forecast_em requires 'code'"
+            )
+        data = self._fetch_em_datacenter(
+            "RPT_PUBLIC_OP_NEWPREDICT", code=code, page_size=10,
+            sort_columns="NOTICE_DATE", sort_types=-1,
+        )
+        rows: list[dict[str, Any]] = []
+        for r in (data.get("result") or {}).get("data") or []:
+            rows.append({
+                "instrument_id": f"{code}.{_code_exchange_suffix(code)}",
+                "symbol": code,
+                "exchange": _code_exchange_name(code),
+                "notice_date": _normalize_em_date(r.get("NOTICE_DATE")),
+                "report_date": _normalize_em_date(r.get("REPORT_DATE")),
+                "finance_item": str(r.get("PREDICT_FINANCE") or ""),
+                "predict_amount_lower": _opt_em_float(r.get("PREDICT_AMT_LOWER")),
+                "predict_amount_upper": _opt_em_float(r.get("PREDICT_AMT_UPPER")),
+                "adjust_amp_lower": _opt_em_float(r.get("ADD_AMP_LOWER")),
+                "adjust_amp_upper": _opt_em_float(r.get("ADD_AMP_UPPER")),
+                "content": str(r.get("PREDICT_CONTENT") or ""),
+            })
+        return rows
+
+    def _fetch_em_datacenter(
+        self,
+        report_name: str,
+        *,
+        code: str,
+        page_size: int,
+        sort_columns: str,
+        sort_types: int,
+    ) -> dict[str, Any]:
+        """东财 datacenter 通用查询（JSON）。"""
+        from urllib.parse import urlencode
+
+        query = urlencode({
+            "reportName": report_name,
+            "columns": "ALL",
+            "filter": f'(SECURITY_CODE="{code}")',
+            "pageSize": page_size,
+            "sortColumns": sort_columns,
+            "sortTypes": sort_types,
+        })
+        url = f"{EM_DATACENTER_URL}?{query}"
+        return self._fetch_json_urlopen(
+            url,
+            params=None,
+            headers={"User-Agent": "Mozilla/5.0"},
+            context=f"eastmoney {report_name}",
+        )
 
     def _fetch_szse_month(self, month: str) -> list[dict[str, Any]]:
         query = urlencode({"month": month})
@@ -681,6 +786,36 @@ class ExchangeRequestAdapter:
                 return response.read()
         except (HTTPError, URLError, TimeoutError, OSError) as exc:
             raise SourceUnavailableError(f"{context} request failed: {exc}") from exc
+
+
+def _code_exchange_suffix(code: str) -> str:
+    """6 位代码 → 交易所后缀（SH/SZ/BJ，按前缀推断）。"""
+    if code.startswith(("6", "5", "9", "688")):
+        return "SH"
+    if code.startswith(("4", "8", "92")):
+        return "BJ"
+    return "SZ"
+
+
+def _code_exchange_name(code: str) -> str:
+    """6 位代码 → AxData 交易所全名（SSE/SZSE/BSE）。"""
+    return {"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}[_code_exchange_suffix(code)]
+
+
+def _normalize_em_date(value: Any) -> str:
+    """东财日期（'2026-08-27 00:00:00'）→ 'YYYYMMDD'。"""
+    if not value:
+        return ""
+    return str(value)[:10].replace("-", "")
+
+
+def _opt_em_float(value: Any) -> Optional[float]:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _resolve_date_range(params: Mapping[str, Any]) -> tuple[date, date, str]:
