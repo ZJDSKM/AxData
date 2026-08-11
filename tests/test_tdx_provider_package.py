@@ -7125,3 +7125,43 @@ def _clear_tdx_provider_modules() -> None:
     for module_name in list(sys.modules):
         if module_name == "axdata_source_tdx" or module_name.startswith("axdata_source_tdx."):
             sys.modules.pop(module_name, None)
+
+
+def test_tdx_kline_all_codes_expands_market_pool() -> None:
+    """08-11 数据仓库：code=None/'all' 时展开全市场代码池（原抛 code is required）。"""
+    from axdata_source_tdx import request_methods as rm
+    from axdata_source_tdx.request_filters import is_all_codes_value
+    from axdata_source_tdx.codes import instrument_id_to_tdx_code
+
+    class _FakeAdapter:
+        def request(self, iface, params):
+            if iface == "stock_codes_tdx":
+                return [
+                    {"tdx_code": "sh600000", "instrument_id": "600000.SH"},
+                    {"tdx_code": "sz000001", "instrument_id": "000001.SZ"},
+                    {"tdx_code": "bj920047", "instrument_id": "920047.BJ"},
+                    {},  # 无标识行应跳过
+                ]
+            return []
+
+        def _finish_request_result(self, client, result):
+            return result
+
+    adapter = _FakeAdapter()
+    assert is_all_codes_value(None) is True
+    assert is_all_codes_value("all") is True
+
+    market_rows = adapter.request("stock_codes_tdx", {"scope": "all"})
+    tdx_codes: list[str] = []
+    seen: set[str] = set()
+    for row in market_rows:
+        t = str(row.get("tdx_code") or "")
+        if not t:
+            try:
+                t = instrument_id_to_tdx_code(str(row.get("instrument_id") or ""))
+            except Exception:
+                continue
+        if t and t not in seen:
+            seen.add(t)
+            tdx_codes.append(t)
+    assert tdx_codes == ["sh600000", "sz000001", "bj920047"]

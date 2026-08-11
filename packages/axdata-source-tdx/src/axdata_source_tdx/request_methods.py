@@ -327,7 +327,7 @@ def request_stock_kline(
 ) -> list[dict[str, Any]]:
     from .kline_helpers import sequential_kline_rows_and_meta, stock_kline_request_result
     from .normalize_utils import get_value
-    from .request_filters import requested_kline_codes
+    from .request_filters import is_all_codes_value, requested_kline_codes
     from .request_params import (
         adjust_param,
         anchor_date_param,
@@ -336,6 +336,32 @@ def request_stock_kline(
         validate_kline_anchor_date,
     )
     from .time_series_normalize import normalize_stock_kline_row
+
+    # 08-11 数据仓库补齐：code 为空/'all'/'*' → 全市场 A 股代码池驱动
+    # （原 requested_kline_codes 对空 code 直接抛 "code is required"，
+    # 采集器无法全市场扫描）。先经 stock_codes_tdx 接口取代码表，
+    # 注入 code 参数后走原有逐码拉取路径。
+    code_value = params.get("code")
+    if is_all_codes_value(code_value):
+        market_rows = adapter.request(
+            "stock_codes_tdx",
+            {"scope": params.get("scope", "all")},
+        )
+        from .codes import instrument_id_to_tdx_code
+
+        tdx_codes: list[str] = []
+        seen: set[str] = set()
+        for row in market_rows:
+            tdx_code = str(row.get("tdx_code") or "")
+            if not tdx_code:
+                try:
+                    tdx_code = instrument_id_to_tdx_code(str(row.get("instrument_id") or ""))
+                except Exception:
+                    continue
+            if tdx_code and tdx_code not in seen:
+                seen.add(tdx_code)
+                tdx_codes.append(tdx_code)
+        params = {**dict(params), "code": tdx_codes}
 
     result = stock_kline_request_result(
         client,
