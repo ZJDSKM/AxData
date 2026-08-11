@@ -186,7 +186,11 @@ async def _send_error(
 
 def _websocket_authorize(websocket: WebSocket) -> None:
     root = data_root()
-    if not api_auth_enabled(data_root=root):
+    # 08-11 修复：传实际 client host——原用默认 host（127.0.0.1→loopback→
+    # 不鉴权），非 loopback 客户端 + token store 启用时 WS 鉴权被跳过
+    # （HTTP 路由却要求 token，双通道不一致）
+    client_host = websocket.client.host if websocket.client else None
+    if not api_auth_enabled(data_root=root, api_host=client_host):
         return
     if not os.getenv("AXDATA_API_TOKEN") and not os.getenv("AXDATA_API_AUTH_REQUIRED", "").strip().lower() in {
         "1",

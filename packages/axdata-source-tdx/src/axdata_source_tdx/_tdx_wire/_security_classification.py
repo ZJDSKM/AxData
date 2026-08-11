@@ -25,14 +25,16 @@ def classify_security(full_code: str) -> tuple[str, str]:
         return "cdr", "SSE CDR code prefix"
     if code.startswith(SZSE_A_SHARE_PREFIXES):
         return "a_share", "SZSE A-share code prefix"
-    if code.startswith("bj92"):
-        return "a_share", "BSE listed stock code prefix"
-    if code.startswith("sh900") or any(code.startswith(f"sz20{digit}") for digit in range(10)):
-        return "b_share", "B-share code prefix"
+    # 08-11 修复：BSE 债券（810/821）先判，股票前缀补齐 bj43/bj8——
+    # 原仅 bj92，43/8 开头落 unknown；与 codes.py 交易所推断一致
     if code.startswith("bj810"):
         return "private_convertible_bond", "BSE private convertible bond prefix"
     if code.startswith("bj821"):
         return "bond", "BSE bond sample prefix"
+    if code.startswith(("bj92", "bj43", "bj8")):
+        return "a_share", "BSE listed stock code prefix"
+    if code.startswith("sh900") or any(code.startswith(f"sz20{digit}") for digit in range(10)):
+        return "b_share", "B-share code prefix"
     return "unknown", "no matched code prefix"
 
 

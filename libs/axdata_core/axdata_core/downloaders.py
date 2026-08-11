@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable
 from uuid import uuid4
@@ -298,13 +299,20 @@ class _LazyDownloaderProfiles:
 DOWNLOADER_PROFILES = _LazyDownloaderProfiles()
 
 
+_DOWNLOADER_PROFILES_LOCK = Lock()
+
+
 def _downloader_profiles() -> dict[str, DownloaderProfile]:
     global _DOWNLOADER_PROFILES_CACHE
+    # 08-11 修复：懒加载加锁——并发首访（调度 ThreadPool）竞态，
+    # 声明加载副作用（import/文件读）非线程安全
     if _DOWNLOADER_PROFILES_CACHE is None:
-        _DOWNLOADER_PROFILES_CACHE = load_builtin_downloader_profiles(
-            ConcurrencyProfile,
-            DownloaderProfile,
-        )
+        with _DOWNLOADER_PROFILES_LOCK:
+            if _DOWNLOADER_PROFILES_CACHE is None:
+                _DOWNLOADER_PROFILES_CACHE = load_builtin_downloader_profiles(
+                    ConcurrencyProfile,
+                    DownloaderProfile,
+                )
     return _DOWNLOADER_PROFILES_CACHE
 
 

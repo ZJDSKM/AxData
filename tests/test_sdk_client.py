@@ -340,7 +340,7 @@ def test_sdk_stream_opens_websocket_and_sends_subscribe(monkeypatch):
         def send(self, message):
             self.sent.append(json.loads(message))
 
-        def recv(self):
+        def recv(self, timeout=None):
             return self.messages.pop(0)
 
         def close(self):

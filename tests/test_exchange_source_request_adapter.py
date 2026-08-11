@@ -234,37 +234,37 @@ def test_exchange_adapter_requests_trade_calendar_range_and_normalizes_rows():
 
     assert rows == [
         {
-            "cal_date": "20260617",
+            "cal_date": "2026-06-17",
             "is_open": True,
             "pretrade_date": "20260616",
             "next_trade_date": "20260618",
         },
         {
-            "cal_date": "20260618",
+            "cal_date": "2026-06-18",
             "is_open": True,
             "pretrade_date": "20260617",
             "next_trade_date": "20260622",
         },
         {
-            "cal_date": "20260619",
+            "cal_date": "2026-06-19",
             "is_open": False,
             "pretrade_date": "20260618",
             "next_trade_date": "20260622",
         },
         {
-            "cal_date": "20260620",
+            "cal_date": "2026-06-20",
             "is_open": False,
             "pretrade_date": "20260618",
             "next_trade_date": "20260622",
         },
         {
-            "cal_date": "20260621",
+            "cal_date": "2026-06-21",
             "is_open": False,
             "pretrade_date": "20260618",
             "next_trade_date": "20260622",
         },
         {
-            "cal_date": "20260622",
+            "cal_date": "2026-06-22",
             "is_open": True,
             "pretrade_date": "20260618",
             "next_trade_date": "20260623",
@@ -285,7 +285,7 @@ def test_exchange_adapter_year_param_uses_full_natural_year():
 
     assert rows == [
         {
-            "cal_date": "20260617",
+            "cal_date": "2026-06-17",
             "is_open": True,
             "pretrade_date": None,
             "next_trade_date": None,
@@ -309,7 +309,7 @@ def test_exchange_adapter_retries_trade_calendar_month_timeout(monkeypatch):
     assert opener.calls_by_month["2026-10"] == 2
     assert rows == [
         {
-            "cal_date": "20261008",
+            "cal_date": "2026-10-08",
             "is_open": True,
             "pretrade_date": None,
             "next_trade_date": None,
@@ -334,7 +334,7 @@ def test_exchange_gateway_routes_trade_calendar_exchange_adapter():
         adapter=adapter,
     )
 
-    assert result.records == [{"cal_date": "20260617", "is_open": True}]
+    assert result.records == [{"cal_date": "2026-06-17", "is_open": True}]
     assert result.meta["source"] == "exchange"
     assert result.meta["requested_fields"] == ["cal_date", "is_open"]
 

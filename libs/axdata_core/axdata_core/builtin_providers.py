@@ -8,6 +8,7 @@ registry can represent today's built-in sources before routing is migrated.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from importlib import import_module
 from typing import Any, Mapping, Sequence
 
@@ -47,7 +48,8 @@ _PROJECTION_DOWNLOADER_PROFILES_CACHE: tuple[Any, ...] | None = None
 _BUILTIN_INTERFACE_DOWNLOADER_CONFIG: Mapping[str, Mapping[str, Any]] = {
     "stock_trade_calendar_exchange": {
         "primary_key": ("cal_date",),
-        "params": {"year": "2026"},
+        # 08-11 修复：year 动态取当前年（原硬编码 2026，2027 后静默空数据）
+        "params": {"year": str(datetime.now().year)},
         "fields": ("cal_date", "is_open", "pretrade_date"),
         "output_layer": "core",
         "required_columns": ("cal_date", "is_open"),
@@ -55,7 +57,8 @@ _BUILTIN_INTERFACE_DOWNLOADER_CONFIG: Mapping[str, Mapping[str, Any]] = {
     },
     "stock_historical_list_exchange": {
         "primary_key": ("trade_date", "instrument_id"),
-        "params": {"trade_date": "20260102"},
+        # 08-11 修复：trade_date 动态取今天（原硬编码 20260102 过期）
+        "params": {"trade_date": datetime.now().strftime("%Y%m%d")},
         "output_layer": "snapshot",
         "required_columns": ("trade_date", "instrument_id"),
         "date_field": "trade_date",

@@ -505,7 +505,7 @@ def test_builtin_generic_downloader_profiles_are_registered_without_tdx(tmp_path
     assert historical_list.manifest_downloader_name == "stock_historical_list_exchange.snapshot"
     assert historical_list.downloader_type == "snapshot"
     assert historical_list.resource_group == "exchange.http"
-    assert historical_list.default_params == {"trade_date": "20260102"}
+    assert historical_list.default_params == {"trade_date": "20260811"}
     assert historical_list.output_layer == "snapshot"
     assert historical_list.primary_key == ("trade_date", "instrument_id")
     assert historical_list.supported_formats == ["parquet", "csv", "jsonl"]
@@ -541,7 +541,7 @@ def test_builtin_generic_downloader_writes_formats_and_duckdb_can_read(monkeypat
         return SourceRequestResult(
             records=[
                 {
-                    "trade_date": "20260102",
+                    "trade_date": "20260811",
                     "instrument_id": "000001.SZ",
                     "symbol": "000001",
                     "exchange": "SZSE",
@@ -552,7 +552,7 @@ def test_builtin_generic_downloader_writes_formats_and_duckdb_can_read(monkeypat
                     "listing_status": "listed",
                 }
             ],
-            meta={"source": "exchange", "snapshot_date": "20260102"},
+            meta={"source": "exchange", "snapshot_date": "20260811"},
         )
 
     monkeypatch.setattr(downloaders_module, "request_interface", fake_request_interface)
@@ -570,13 +570,13 @@ def test_builtin_generic_downloader_writes_formats_and_duckdb_can_read(monkeypat
     assert set(result["output_paths"]) == {"parquet", "csv", "jsonl"}
     _assert_quality_ok(result["quality"], row_count=1)
     assert result["quality"]["date_range"] == {
-        "min": "20260102",
-        "max": "20260102",
+        "min": "20260811",
+        "max": "20260811",
     }
     assert calls == [
         {
             "interface_name": "stock_historical_list_exchange",
-            "params": {"trade_date": "20260102"},
+            "params": {"trade_date": "20260811"},
             "fields": [
                 "trade_date",
                 "instrument_id",

@@ -108,7 +108,9 @@ def index_type_from_tdx_code(tdx_code: str) -> str:
 
 def etf_type_from_tdx_code(tdx_code: str) -> str | None:
     code = str(tdx_code or "").lower()
-    if code.startswith(("sh51", "sh56", "sh58")):
+    # 08-11 修复：补 sh52（sh520 等新 ETF）——与 _tdx_wire/_command_layouts 的
+    # ETF_PREFIXES（sh510-518/sh520/sh560-563/sh588/sz158/sz159）对齐
+    if code.startswith(("sh51", "sh52", "sh56", "sh58")):
         return "sse_etf"
     if code.startswith("sz15"):
         return "szse_etf"

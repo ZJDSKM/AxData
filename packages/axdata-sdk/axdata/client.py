@@ -842,7 +842,13 @@ class AxDataStream:
         if self._ws is None:
             self.open()
         assert self._ws is not None
-        raw = self._ws.recv()
+        # 08-11 修复：recv 加超时（服务端静默断开/代理半开时不再永久阻塞），
+        # 超时主动断开触发重连；服务端 ping 由 websocket-client 自动 pong
+        try:
+            raw = self._ws.recv(timeout=self.timeout)
+        except Exception:
+            self.close()
+            raise StopIteration
         if raw in (None, ""):
             raise StopIteration
         payload = json.loads(raw)

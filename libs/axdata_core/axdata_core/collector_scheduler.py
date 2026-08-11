@@ -9,6 +9,7 @@ runtime at module import time.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -21,6 +22,8 @@ from threading import Condition, Lock, RLock, Thread
 from time import sleep
 from typing import Any, Iterable, Mapping
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 SCHEDULER_STORE_VERSION = 1
 COLLECTOR_SCHEDULER_FILE_NAME = "collector_scheduler.json"
@@ -823,6 +826,7 @@ class CollectorSchedulerService:
         self.tick_seconds = max(float(tick_seconds), 0.1)
         self._executor = ThreadPoolExecutor(max_workers=max(int(max_workers), 1), thread_name_prefix="axdata-collector")
         self._resources = _ResourceGroupLimiter(resource_group_limits)
+        self._loop_failures = 0  # 08-11：调度循环连续失败计数（防日志刷屏）
         self._futures: dict[str, Future[Any]] = {}
         self._futures_lock = Lock()
         self._loop_started = False
@@ -1170,7 +1174,13 @@ class CollectorSchedulerService:
             try:
                 self.tick_due_tasks()
             except Exception:
-                pass
+                # 08-11 修复：原裸 except: pass 静默吞错——调度循环故障无任何
+                # 日志，任务停跑难以排查
+                if self._loop_failures < 5 or self._loop_failures % 20 == 0:
+                    logger.exception("调度循环 tick 异常（继续，连续失败 #%d）", self._loop_failures + 1)
+                self._loop_failures += 1
+            else:
+                self._loop_failures = 0
             sleep(self.tick_seconds)
 
     def _execute_run(self, run_id: str) -> None:

@@ -177,7 +177,9 @@ def _is_official_stock_basic(dataset: str, source: str | None) -> bool:
 
 
 def _validate_official_stock_basic_fetch(df: "pd.DataFrame", *, params: dict[str, Any]) -> None:
-    if params.get("limit") not in (None, ""):
+    # 08-11 修复：limit=0 视为未限制（原 "0" not in (None, "") 误判拒绝持久化）
+    limit = params.get("limit")
+    if limit is not None and str(limit).strip() not in ("", "0"):
         raise ValueError(
             "Refusing to persist limited official stock_basic_exchange data. "
             "Use dry-run for previews, or run without --limit to collect a complete exchange list."
