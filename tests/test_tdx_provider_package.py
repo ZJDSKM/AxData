@@ -6235,7 +6235,7 @@ def test_external_tdx_request_respects_explicit_disable(monkeypatch, tmp_path) -
     disable_provider(TDX_PROVIDER_ID, data_root=data_root)
     _clear_tdx_provider_modules()
 
-    with pytest.raises(SourceUnavailableError, match=TDX_PLUGIN_REQUIRED_MESSAGE):
+    with pytest.raises(SourceUnavailableError, match="TDX provider.*is disabled"):
         request_interface(
             TDX_INTERFACE_NAME,
             params={"scope": "all"},

@@ -1758,7 +1758,9 @@ def test_registry_adapter_for_tdx_requires_plugin(tmp_path) -> None:
     )
 
     assert "unavailable=True" in result.stdout
-    assert f"message={TDX_PLUGIN_REQUIRED_MESSAGE}" in result.stdout
+    # 08-11 诊断改进：provider 存在但不可用时附真实 status（含 provider_id）
+    assert "message=TDX provider" in result.stdout
+    assert "is disabled for interface" in result.stdout
     assert "loaded=\n" in result.stdout
 
 
@@ -1807,7 +1809,9 @@ def test_registry_adapter_for_tdx_ext_requires_plugin(tmp_path) -> None:
     )
 
     assert "unavailable=True" in result.stdout
-    assert f"message={TDX_PLUGIN_REQUIRED_MESSAGE}" in result.stdout
+    # 08-11 诊断改进：provider 存在但不可用时附真实 status（含 provider_id）
+    assert "message=TDX provider" in result.stdout
+    assert "is disabled for interface" in result.stdout
     assert "loaded=\n" in result.stdout
 
 
@@ -2283,7 +2287,9 @@ def test_unregistered_tdx_suffix_does_not_load_tdx_runtime() -> None:
     )
 
     assert "unavailable=True" in result.stdout
-    assert f"message={TDX_PLUGIN_REQUIRED_MESSAGE}" in result.stdout
+    # 08-11 诊断改进：provider 存在但不可用时附真实 status（含 provider_id）
+    assert "message=TDX provider" in result.stdout
+    assert "is disabled for interface" in result.stdout
     assert "loaded=\n" in result.stdout
 
 
@@ -2322,7 +2328,9 @@ def test_request_interface_unknown_tdx_suffix_does_not_load_tdx_runtime() -> Non
     )
 
     assert "unavailable=True" in result.stdout
-    assert f"message={TDX_PLUGIN_REQUIRED_MESSAGE}" in result.stdout
+    # 08-11 诊断改进：provider 存在但不可用时附真实 status（含 provider_id）
+    assert "message=TDX provider" in result.stdout
+    assert "is disabled for interface" in result.stdout
     assert "loaded=\n" in result.stdout
 
 
