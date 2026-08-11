@@ -132,8 +132,7 @@ def adapter_for_interface(
     try:
         contract = get_request_interface(interface_name)
     except KeyError as exc:
-        if _is_tdx_interface_name(interface_name):
-            raise SourceUnavailableError(TDX_PLUGIN_REQUIRED_MESSAGE) from exc
+        # 08-11：不存在的 _tdx 接口伪装成"插件未安装"误导排查（见 catalog.py）
         raise SourceAdapterNotFound(f"No source adapter is registered for interface {interface_name!r}.") from exc
     try:
         return adapter_for_source_code(contract.source_code, options=options)
@@ -275,8 +274,7 @@ def _contract_for_interface(
     try:
         return get_request_interface(interface_name)
     except KeyError as exc:
-        if _is_tdx_interface_name(interface_name):
-            raise SourceUnavailableError(TDX_PLUGIN_REQUIRED_MESSAGE) from exc
+        # 08-11：不存在的 _tdx 接口伪装成"插件未安装"误导排查——报未知接口
         if registry_error is not None:
             raise SourceInterfaceNotFound(str(registry_error)) from registry_error
         raise SourceInterfaceNotFound(str(exc)) from exc

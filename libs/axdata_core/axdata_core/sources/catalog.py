@@ -52,8 +52,8 @@ def get_request_interface(name: str) -> SourceRequestInterface:
     try:
         return INTERFACES[normalized]
     except KeyError as exc:
-        if normalized.endswith("_tdx"):
-            raise SourceUnavailableError(TDX_PLUGIN_REQUIRED_MESSAGE) from exc
+        # 08-11：不存在的 _tdx 接口（拼写错/从未实现）伪装成"TDX 插件未安装"
+        # 会误导排查——真实 TDX 插件已安装，接口缺失应报未知接口。
         known = ", ".join(list_request_interface_names()) or "<empty>"
         raise KeyError(
             f"Unknown AxData request interface {name!r}. Known interfaces: {known}."

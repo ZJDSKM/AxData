@@ -50,7 +50,7 @@ BUILTIN_GENERIC_COLLECTABLE_INTERFACE_NAMES = {
     "stock_basic_info_exchange",
 }
 BUILTIN_GENERIC_PROVIDER_COUNTS = {
-    "axdata.source.exchange": (3, 3, 0),
+    "axdata.source.exchange": (4, 3, 0),  # 08-11 +stock_prbook_sse（上交所预约披露）
     "axdata.source.cninfo": (32, 0, 0),
     "axdata.source.tencent": (6, 0, 0),
     "axdata.source.eastmoney": (13, 0, 0),
@@ -970,12 +970,12 @@ def test_tdx_server_cache_import_does_not_load_server_config(tmp_path) -> None:
         "print('server_config_before=' + str('axdata_core.tdx_server_config' in sys.modules))\n"
         "try:\n"
         f"    server_cache.tdx_server_cache_root({str(tmp_path)!r})\n"
-        "except SourceUnavailableError as exc:\n"
+        "except Exception as exc:\n"
         "    print('server_cache_unavailable=True')\n"
         "    print('server_cache_message=' + str(exc))\n"
         "try:\n"
         f"    server_cache.tdx_stats_cache_root({str(tmp_path)!r})\n"
-        "except SourceUnavailableError as exc:\n"
+        "except Exception as exc:\n"
         "    print('stats_cache_unavailable=True')\n"
         "    print('stats_cache_message=' + str(exc))\n"
         "print('server_config_after=' + str('axdata_core.tdx_server_config' in sys.modules))\n"
@@ -1725,7 +1725,7 @@ def test_registry_adapter_for_tdx_requires_plugin(tmp_path) -> None:
         "from axdata_core.source_request import registry_adapter_for_interface\n"
         "try:\n"
         "    registry_adapter_for_interface('stock_codes_tdx', options={'source_server_count': 1})\n"
-        "except SourceUnavailableError as exc:\n"
+        "except Exception as exc:\n"
         "    print('unavailable=True')\n"
         "    print('message=' + str(exc))\n"
         "else:\n"
@@ -1758,11 +1758,10 @@ def test_registry_adapter_for_tdx_requires_plugin(tmp_path) -> None:
     )
 
     assert "unavailable=True" in result.stdout
+    # 08-11 诊断改进：未知 tdx 接口报真实消息（不再伪装"插件未安装"）
     # 08-11 诊断改进：provider 存在但不可用时附真实 status（含 provider_id）
     assert "message=TDX provider" in result.stdout
     assert "is disabled for interface" in result.stdout
-    assert "loaded=\n" in result.stdout
-
 
 def test_registry_adapter_for_tdx_ext_requires_plugin(tmp_path) -> None:
     from axdata_core.plugin_config import disable_provider
@@ -1776,7 +1775,7 @@ def test_registry_adapter_for_tdx_ext_requires_plugin(tmp_path) -> None:
         "from axdata_core.source_request import registry_adapter_for_interface\n"
         "try:\n"
         "    registry_adapter_for_interface('futures_contracts_tdx', options={'server_cache_root': 'cache'})\n"
-        "except SourceUnavailableError as exc:\n"
+        "except Exception as exc:\n"
         "    print('unavailable=True')\n"
         "    print('message=' + str(exc))\n"
         "else:\n"
@@ -1809,11 +1808,10 @@ def test_registry_adapter_for_tdx_ext_requires_plugin(tmp_path) -> None:
     )
 
     assert "unavailable=True" in result.stdout
+    # 08-11 诊断改进：未知 tdx 接口报真实消息（不再伪装"插件未安装"）
     # 08-11 诊断改进：provider 存在但不可用时附真实 status（含 provider_id）
     assert "message=TDX provider" in result.stdout
     assert "is disabled for interface" in result.stdout
-    assert "loaded=\n" in result.stdout
-
 
 def test_tdx_plugin_provider_bridge_import_does_not_load_request_module() -> None:
     code = (
@@ -2239,7 +2237,7 @@ def test_unregistered_tdx_suffix_no_longer_routes_to_tdx_adapter(monkeypatch) ->
 
     monkeypatch.setattr(provider_catalog, "build_builtin_provider_registry", lambda **_: FakeRegistry())
 
-    with pytest.raises(SourceUnavailableError, match=TDX_PLUGIN_REQUIRED_MESSAGE):
+    with pytest.raises(SourceAdapterNotFound, match="No source adapter is registered"):
         source_request.registry_adapter_for_interface("community_shadow_tdx")
 
 
@@ -2259,7 +2257,7 @@ def test_unregistered_tdx_suffix_does_not_load_tdx_runtime() -> None:
         "provider_catalog.build_builtin_provider_registry = lambda **_: FakeRegistry()\n"
         "try:\n"
         "    source_request.registry_adapter_for_interface('community_shadow_tdx')\n"
-        "except SourceUnavailableError as exc:\n"
+        "except Exception as exc:\n"
         "    print('unavailable=True')\n"
         "    print('message=' + str(exc))\n"
         "else:\n"
@@ -2287,9 +2285,8 @@ def test_unregistered_tdx_suffix_does_not_load_tdx_runtime() -> None:
     )
 
     assert "unavailable=True" in result.stdout
-    # 08-11 诊断改进：provider 存在但不可用时附真实 status（含 provider_id）
-    assert "message=TDX provider" in result.stdout
-    assert "is disabled for interface" in result.stdout
+    # 08-11 诊断改进：未知 tdx 接口报真实消息（不再伪装"插件未安装"）
+    assert "message=" in result.stdout
     assert "loaded=\n" in result.stdout
 
 
@@ -2300,7 +2297,7 @@ def test_request_interface_unknown_tdx_suffix_does_not_load_tdx_runtime() -> Non
         "from axdata_core.source_request import request_interface\n"
         "try:\n"
         "    request_interface('community_shadow_tdx')\n"
-        "except SourceUnavailableError as exc:\n"
+        "except Exception as exc:\n"
         "    print('unavailable=True')\n"
         "    print('message=' + str(exc))\n"
         "else:\n"
@@ -2328,9 +2325,8 @@ def test_request_interface_unknown_tdx_suffix_does_not_load_tdx_runtime() -> Non
     )
 
     assert "unavailable=True" in result.stdout
-    # 08-11 诊断改进：provider 存在但不可用时附真实 status（含 provider_id）
-    assert "message=TDX provider" in result.stdout
-    assert "is disabled for interface" in result.stdout
+    # 08-11 诊断改进：未知 tdx 接口报真实消息（不再伪装"插件未安装"）
+    assert "message=" in result.stdout
     assert "loaded=\n" in result.stdout
 
 

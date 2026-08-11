@@ -488,7 +488,7 @@ def test_plugin_config_can_disable_tdx_plugin_from_catalog_and_routes(
 
     monkeypatch.setattr(provider_catalog, "build_builtin_provider_registry", lambda **_kwargs: registry)
 
-    with pytest.raises(SourceUnavailableError, match=TDX_PLUGIN_REQUIRED_MESSAGE):
+    with pytest.raises(SourceUnavailableError, match="TDX provider.*is disabled"):
         source_request.registry_adapter_for_interface("stock_codes_tdx")
 
 
