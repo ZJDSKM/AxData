@@ -30,6 +30,7 @@ SUPPORTED_INTERFACES = {
     "stock_prbook_sse",
     "stock_prbook_em",
     "stock_performance_forecast_em",
+    "stock_performance_express_em",
 }
 
 SSE_PRBOOK_URL = "https://query.sse.com.cn/commonSoaQuery.do"
@@ -136,6 +137,8 @@ class ExchangeRequestAdapter:
             return self._request_stock_prbook_em(params)
         if interface_name == "stock_performance_forecast_em":
             return self._request_stock_performance_forecast_em(params)
+        if interface_name == "stock_performance_express_em":
+            return self._request_stock_performance_express_em(params)
         raise SourceAdapterNotFound(
             f"Exchange source adapter does not support interface {interface_name!r}."
         )
@@ -418,6 +421,40 @@ class ExchangeRequestAdapter:
                 "adjust_amp_lower": _opt_em_float(r.get("ADD_AMP_LOWER")),
                 "adjust_amp_upper": _opt_em_float(r.get("ADD_AMP_UPPER")),
                 "content": str(r.get("PREDICT_CONTENT") or ""),
+            })
+        return rows
+
+    def _request_stock_performance_express_em(
+        self, params: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """东财业绩快报（结构化：净利/营收/同比，08-12）。
+
+        实测 600101 2026-07-22 快报：净利 5314 万（同比 -27.9%）、
+        营收 15.58 亿（同比 +2.2%）——评估"空/多"的核心数据。
+        """
+        code = str(params.get("code") or "").strip()
+        if not code:
+            raise SourceRequestValidationError(
+                "stock_performance_express_em requires 'code'"
+            )
+        data = self._fetch_em_datacenter(
+            "RPT_FCI_PERFORMANCEE", code=code, page_size=10,
+            sort_columns="UPDATE_DATE", sort_types=-1,
+        )
+        rows: list[dict[str, Any]] = []
+        for r in (data.get("result") or {}).get("data") or []:
+            rows.append({
+                "instrument_id": f"{code}.{_code_exchange_suffix(code)}",
+                "symbol": code,
+                "exchange": _code_exchange_name(code),
+                "notice_date": _normalize_em_date(r.get("NOTICE_DATE")),
+                "report_date": _normalize_em_date(r.get("REPORT_DATE")),
+                "net_profit": _opt_em_float(r.get("PARENT_NETPROFIT")),
+                "net_profit_yoy": _opt_em_float(r.get("JLRTBZCL")),
+                "revenue": _opt_em_float(r.get("TOTAL_OPERATE_INCOME")),
+                "revenue_yoy": _opt_em_float(r.get("YSTZ")),
+                "roe": _opt_em_float(r.get("WEIGHTAVG_ROE")),
+                "data_type": str(r.get("DATATYPE") or ""),
             })
         return rows
 
