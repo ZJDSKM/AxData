@@ -663,3 +663,40 @@ def test_exchange_adapter_rejects_invalid_historical_stock_list_params():
             "stock_historical_list_exchange",
             {"trade_date": "20240102", "exchange": "NYSE"},
         )
+
+
+class FakePrbookOpener:
+    """stock_prbook_sse：返回上交所 JSONP 文本（首次预约 2026-08-27）。"""
+
+    def __init__(self) -> None:
+        self.last_url = ""
+
+    def __call__(self, request, timeout):
+        self.last_url = request.full_url
+        payload = (
+            'cb({"result":[{"companyCode":"600101","publishDate0":"2026-08-27",'
+            '"publishDate1":"","publishDate2":"","publishDate3":"",'
+            '"publishYear":"2026","companyAbbr":"明星电力","actualDate":"",'
+            '"bulletinType":"L012"}]})'
+        )
+        return FakeTextResponse(payload)
+
+
+def test_exchange_adapter_stock_prbook_sse_normalizes_rows():
+    """上交所定期报告预约披露：JSONP 剥壳 + 字段归一化（08-11 外部渠道整合）。"""
+    opener = FakePrbookOpener()
+    adapter = ExchangeRequestAdapter(opener=opener)
+    rows = adapter.request("stock_prbook_sse", {"code": "600101"})
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["instrument_id"] == "600101.SH"
+    assert row["symbol"] == "600101"
+    assert row["exchange"] == "SSE"
+    assert row["bulletin_type"] == "L012"
+    assert row["report_type"] == "半年报"
+    assert row["publish_year"] == "2026"
+    assert row["first_publish_date"] == "20260827"
+    assert row["change_date_1"] == ""
+    assert row["actual_date"] == ""
+    assert "commonSoaQuery.do" in opener.last_url
+    assert "sqlId=SSE_SZSGG_DQBGYYQK_CAST_NEW" in opener.last_url

@@ -27,7 +27,11 @@ SUPPORTED_INTERFACES = {
     "stock_trade_calendar_exchange",
     "stock_historical_list_exchange",
     "stock_basic_info_exchange",
+    "stock_prbook_sse",
 }
+
+SSE_PRBOOK_URL = "https://query.sse.com.cn/commonSoaQuery.do"
+SSE_PRBOOK_SQL_ID = "SSE_SZSGG_DQBGYYQK_CAST_NEW"
 
 SZSE_CALENDAR_URL = "https://www.szse.cn/api/report/exchange/onepersistenthour/monthList"
 SSE_STOCK_LIST_URL = "https://query.sse.com.cn/sseQuery/commonQuery.do"
@@ -123,6 +127,8 @@ class ExchangeRequestAdapter:
             return self._request_stock_historical_list(params)
         if interface_name == "stock_basic_info_exchange":
             return self._request_stock_basic_info(params)
+        if interface_name == "stock_prbook_sse":
+            return self._request_stock_prbook_sse(params)
         raise SourceAdapterNotFound(
             f"Exchange source adapter does not support interface {interface_name!r}."
         )
@@ -255,6 +261,88 @@ class ExchangeRequestAdapter:
             "filtered_count": len(filtered),
         }
         return filtered
+
+    def _request_stock_prbook_sse(self, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """上交所定期报告预约披露（首次预约/变更/实际披露日）。
+
+        08-11 外部渠道整合：BFF 曾直连 query.sse.com.cn JSONP，现归入
+        exchange 源统一管理（实测 600101 中报首次预约 2026-08-27）。
+        仅沪市；深市为独立通道（后续接入）。
+        """
+        code = str(params.get("code") or "").strip()
+        if not code:
+            raise SourceRequestValidationError(
+                "stock_prbook_sse requires 'code'"
+            )
+        publish_year = str(params.get("publish_year") or "") or None
+        if publish_year is None:
+            from datetime import datetime
+
+            publish_year = str(datetime.now().year)
+
+        from urllib.parse import urlencode
+
+        query = urlencode({
+            "jsonCallBack": "cb",
+            "sqlId": SSE_PRBOOK_SQL_ID,
+            "isPagination": "true",
+            "pageHelp.pageSize": 100,
+            "pageHelp.pageNo": 1,
+            "pageHelp.beginPage": 1,
+            "pageHelp.cacheSize": 1,
+            "pageHelp.endPage": 1,
+            "bulletintype": "",
+            "publishYear": publish_year,
+            "companyCode": code,
+            "startTime": "",
+            "order": "companyCode|asc",
+        })
+        url = f"{SSE_PRBOOK_URL}?{query}"
+        try:
+            text = self._fetch_text_urlopen(
+                url,
+                params=None,
+                headers={
+                    "Referer": "https://www.sse.com.cn/",
+                    "User-Agent": "Mozilla/5.0",
+                },
+                context="SSE periodic report appointment",
+            )
+        except Exception as exc:
+            raise SourceUnavailableError(
+                f"SSE prbook request failed: {exc}"
+            ) from exc
+
+        match = re.search(r"cb\((.*)\)\s*$", text, re.S)
+        if not match:
+            raise SourceUnavailableError("SSE prbook returned no JSONP payload")
+        try:
+            data = json.loads(match.group(1))
+        except ValueError as exc:
+            raise SourceUnavailableError("SSE prbook returned invalid JSON") from exc
+
+        report_names = {"L011": "一季报", "L012": "半年报",
+                        "L013": "三季报", "L014": "年报"}
+        rows: list[dict[str, Any]] = []
+        for r in data.get("result") or []:
+            bt = str(r.get("bulletinType") or "")
+            first = str(r.get("publishDate0") or "").replace("-", "")
+            if not bt or not first:
+                continue
+            rows.append({
+                "instrument_id": f"{code}.SH",
+                "symbol": code,
+                "exchange": "SSE",
+                "bulletin_type": bt,
+                "report_type": report_names.get(bt, bt),
+                "publish_year": str(r.get("publishYear") or publish_year),
+                "first_publish_date": first,
+                "change_date_1": str(r.get("publishDate1") or "").replace("-", ""),
+                "change_date_2": str(r.get("publishDate2") or "").replace("-", ""),
+                "change_date_3": str(r.get("publishDate3") or "").replace("-", ""),
+                "actual_date": str(r.get("actualDate") or "").replace("-", ""),
+            })
+        return rows
 
     def _fetch_szse_month(self, month: str) -> list[dict[str, Any]]:
         query = urlencode({"month": month})
