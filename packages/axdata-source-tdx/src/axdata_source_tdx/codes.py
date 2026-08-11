@@ -50,12 +50,16 @@ def instrument_id_to_tdx_code(instrument_id: str) -> str:
 
     if len(symbol) != 6 or not symbol.isdigit():
         raise SourceRequestValidationError(f"Invalid instrument_id: {instrument_id!r}")
-    if symbol.startswith(("6", "9")):
+    # 08-11 fork 修复：北交所前缀（8/920/430）必须先于 9->sh 判断——
+    # 原顺序 920047 被 9 前缀抢走映射为 sh920047（静默伪映射），430 未识别
+    if symbol.startswith(("8", "92", "43")):
+        return "bj" + symbol
+    if symbol.startswith(("6", "9", "5")):
+        # 6/9: 沪主板/科创/沪B；5: 沪市基金（510/512/513/515/518 ETF、501/502 LOF）
         return "sh" + symbol
     if symbol.startswith(("0", "1", "2", "3")):
+        # 0/3: 深主板/创业板；1: 深市基金（159 ETF/LOF）；2: 深B
         return "sz" + symbol
-    if symbol.startswith(("8", "92")):
-        return "bj" + symbol
     raise SourceRequestValidationError(f"Unable to infer exchange for instrument_id: {instrument_id!r}")
 
 

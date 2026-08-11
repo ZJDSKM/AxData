@@ -499,6 +499,16 @@ def limit_ladder_count_param(value: Any) -> int | None:
     return parsed
 
 
+def _is_fund_symbol(symbol: str) -> bool:
+    """场内基金/ETF 前缀判定（TDX 盘口对基金返回「角」单位价，须 /10）。
+
+    - 沪市基金：5 开头（510/511/512/513/515/518 等 ETF、501/502 LOF）
+    - 深市基金：1 开头（159 等 ETF/LOF）
+    股票不落入这两个前缀（沪主板 6、科创 688、深主板 0、中小 002、创业 300）。
+    """
+    return symbol.startswith(("5", "1"))
+
+
 def normalize_order_book_rows(quote: Any) -> list[dict[str, Any]]:
     tdx_code = quote_tdx_code(quote)
     instrument_id = tdx_code_to_instrument_id(tdx_code)
@@ -506,6 +516,9 @@ def normalize_order_book_rows(quote: Any) -> list[dict[str, Any]]:
     exchange = MARKET_TO_EXCHANGE.get(tdx_code[:2], str(get_value(quote, "exchange") or "").upper())
     bid_levels = list(get_value(quote, "bid_levels", ()) or ())
     ask_levels = list(get_value(quote, "ask_levels", ()) or ())
+    # 08-11 fork 修复：基金/ETF 盘口价 TDX 以「角」返回（10 倍于真实元价），
+    # snapshot/tick/intraday 均为元——仅盘口须 /10（实测 ob/last ≈ 10）
+    fund_scale = 10.0 if _is_fund_symbol(symbol) else 1.0
 
     rows: list[dict[str, Any]] = []
     for index in range(5):
@@ -518,9 +531,9 @@ def normalize_order_book_rows(quote: Any) -> list[dict[str, Any]]:
                 "tdx_code": tdx_code,
                 "exchange": exchange,
                 "level": index + 1,
-                "bid_price": round_optional_float(get_value(bid_level, "price")) if bid_level is not None else None,
+                "bid_price": round_optional_float(get_value(bid_level, "price") / fund_scale) if bid_level is not None else None,
                 "bid_volume": optional_int(get_value(bid_level, "volume")) if bid_level is not None else None,
-                "ask_price": round_optional_float(get_value(ask_level, "price")) if ask_level is not None else None,
+                "ask_price": round_optional_float(get_value(ask_level, "price") / fund_scale) if ask_level is not None else None,
                 "ask_volume": optional_int(get_value(ask_level, "volume")) if ask_level is not None else None,
             }
         )

@@ -155,9 +155,13 @@ class ExchangeRequestAdapter:
             cal_date = _format_date(day)
             if cal_date not in calendar_by_date:
                 continue
+            # 08-11 fork 修复：cal_date 输出 ISO（YYYY-MM-DD）——原 %Y%m%d 8 位
+            # 无横线，与标准日期格式不一致导致下游（ax-tdx equity/learning_daemon）
+            # 误判非交易日；内部比较仍用 8 位（_normalize_source_date 统一）
+            iso_date = f"{cal_date[:4]}-{cal_date[4:6]}-{cal_date[6:8]}"
             rows.append(
                 {
-                    "cal_date": cal_date,
+                    "cal_date": iso_date,
                     "is_open": calendar_by_date[cal_date],
                     "pretrade_date": _previous_open_date(open_dates, cal_date),
                     "next_trade_date": _next_open_date(open_dates, cal_date),
