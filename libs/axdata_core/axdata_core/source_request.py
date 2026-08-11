@@ -195,7 +195,16 @@ def registry_adapter_for_interface(
         unavailable_provider = _provider_for_unavailable_interface(registry, interface_name)
         if unavailable_provider is not None:
             if _is_tdx_provider(unavailable_provider):
-                raise SourceUnavailableError(TDX_PLUGIN_REQUIRED_MESSAGE)
+                # 08-11 事故教训：清单校验失败（如 downloaders 与
+                # collection.supported 矛盾）时 provider status=failed，
+                # 伪装成"TDX 插件未安装"会把排查引向错误方向——附上
+                # 真实 status/error（清单错误内容），排查秒级定位。
+                status = unavailable_provider.status
+                detail = f" {unavailable_provider.error}" if unavailable_provider.error else ""
+                raise SourceUnavailableError(
+                    f"TDX provider {unavailable_provider.provider_id!r} is {status} "
+                    f"for interface {interface_name!r}.{detail}"
+                )
             status = unavailable_provider.status
             detail = f" {unavailable_provider.error}" if unavailable_provider.error else ""
             raise SourceAdapterNotFound(
