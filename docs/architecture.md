@@ -215,6 +215,15 @@ axdata-home/
 - 复权可重算：保留未复权价格和复权因子，前复权/后复权视图由查询层或因子层派生。
 - 失败可恢复：任何采集批次都能重放，任何衍生层都能从上游重新生成。
 
+### TDX transport runtime
+
+`axdata-source-tdx` 的 7709 传输层采用每连接槽一个 Actor 的模型。Actor
+独占 TCP socket，负责连接、发送、增量收包、心跳、重连和关闭；调用线程只
+提交同步 request ticket。`PooledSocketTransport` 以有界 FIFO 队列分配空闲
+槽位，并把排队时间计入请求超时。普通源端直取仍可使用请求级 client，批量
+采集和实时任务通过 pool size 获得并行度，不在 socket 上叠加 reader/heartbeat
+线程。
+
 ## 关键设计决策
 
 - 统一代码格式：A 股使用 `000001.SZ`、`600000.SH`、`430047.BJ` 这类后缀格式，源适配器负责与各源编码互转。

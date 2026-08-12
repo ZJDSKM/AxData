@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   changes:
     name: Detect changed files
@@ -141,7 +145,7 @@ jobs:
             -e packages/axdata-source-cninfo
 
       - name: Run pytest
-        run: python -m pytest -q
+        run: python -m pytest -q -n auto --dist loadfile
 
       - name: Compile Python modules
         run: python -m compileall -q libs/axdata_core apps/api packages/axdata-sdk services scripts tests
