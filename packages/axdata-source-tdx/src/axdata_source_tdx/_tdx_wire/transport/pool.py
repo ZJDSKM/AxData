@@ -18,7 +18,7 @@ from axdata_source_tdx._tdx_wire._host_utils import unique_hosts
 if TYPE_CHECKING:
     from .socket import SocketTransport
 
-_STDLIB_EXPORTS = {"threading"}
+_STDLIB_EXPORTS = {"itertools", "threading"}
 
 
 class PooledSocketTransport:
@@ -54,6 +54,7 @@ class PooledSocketTransport:
             int(max_pending_requests) if max_pending_requests is not None else self._pool_size * 4,
         )
         self._transports: list[SocketTransport | None] = [None] * self._pool_size
+        _itertools_module()
         self._idle_slots: deque[int] = deque(range(self._pool_size))
         self._waiters: deque[object] = deque()
         self._condition = _threading_module().Condition(_threading_module().Lock())
@@ -222,7 +223,15 @@ def _threading_module():
     return module
 
 
+def _itertools_module():
+    module = import_module("itertools")
+    globals()["itertools"] = module
+    return module
+
+
 def __getattr__(name: str) -> Any:
+    if name == "itertools":
+        return _itertools_module()
     if name == "threading":
         return _threading_module()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
