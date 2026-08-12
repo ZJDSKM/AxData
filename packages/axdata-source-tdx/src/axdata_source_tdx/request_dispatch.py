@@ -7,6 +7,13 @@ from typing import Any
 
 from .request_params import INDEX_KLINE_INTERFACE
 
+TDX_REALTIME_SNAPSHOT_INTERFACES = frozenset(
+    {
+        "stock_realtime_snapshot_tdx",
+        "index_realtime_snapshot_tdx",
+        "etf_realtime_snapshot_tdx",
+    }
+)
 
 TDX_EXACT_REQUEST_METHODS: dict[str, str] = {
     "index_codes_tdx": "_request_index_codes",
@@ -78,6 +85,15 @@ def dispatch_adapter_request(
         kline_codes = requested_kline_codes(params.get("code"))
         if len(kline_codes) > 1:
             return adapter._request_stock_kline_parallel(interface_name, params, kline_codes)
+
+    if interface_name in TDX_REALTIME_SNAPSHOT_INTERFACES and existing_client is None:
+        snapshot_codes = requested_kline_codes(params.get("code"))
+        if len(snapshot_codes) > 80 and adapter._has_connection_options():
+            return adapter._request_realtime_snapshot_parallel(
+                interface_name,
+                params,
+                snapshot_codes,
+            )
 
     client = existing_client or create_client(interface_name, params)
     return dispatch_with_client(

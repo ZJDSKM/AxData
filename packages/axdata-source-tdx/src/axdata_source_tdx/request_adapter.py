@@ -96,6 +96,11 @@ class TdxRequestAdapter:
             configured_hosts_from_options=configured_tdx_hosts_from_options,
         )
 
+    def _has_connection_options(self) -> bool:
+        from .options import has_tdx_connection_options
+
+        return has_tdx_connection_options(self._options)
+
     def _request_stock_codes(
         self,
         client: Any,
@@ -180,6 +185,21 @@ class TdxRequestAdapter:
         from . import request_methods
 
         return request_methods.request_index_realtime_snapshot(self, client, params)
+
+    def _request_realtime_snapshot_parallel(
+        self,
+        interface_name: str,
+        params: Mapping[str, Any],
+        tdx_codes: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        from . import request_methods
+
+        return request_methods.request_realtime_snapshot_parallel(
+            self,
+            interface_name,
+            params,
+            tdx_codes,
+        )
 
     def _request_stock_kline(
         self,

@@ -319,6 +319,58 @@ def request_index_realtime_snapshot(
     return adapter._finish_request_result(client, result)
 
 
+def request_realtime_snapshot_parallel(
+    adapter: Any,
+    interface_name: str,
+    params: Mapping[str, Any],
+    tdx_codes: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Fetch a multi-batch snapshot through a hosts-by-connections group."""
+
+    from .client_factory import create_tdx_client
+    from .execution_utils import tdx_client_meta
+    from .kline_helpers import tdx_parallel_client_meta
+    from .normalize_utils import as_list
+    from .options import tdx_server_group_options
+    from .quote_fetch import explicit_quote_server_group_request_result
+    from .quote_identity import quote_security_from_tdx_code
+    from .request_host_config import configured_tdx_hosts_from_options, effective_host_strings
+    from .request_limits import DEFAULT_QUOTE_BATCH_SIZE
+    from .server_group import execute_server_group_batches
+    from .snapshot_normalize import normalize_index_snapshot_row, normalize_realtime_snapshot_row
+    from .wire_requests import tdx_explicit_quotes
+
+    server_options = tdx_server_group_options(
+        adapter._options,
+        configured_hosts=lambda options: configured_tdx_hosts_from_options(
+            options,
+            effective_host_strings_func=effective_host_strings,
+        ),
+    )
+    index_like = interface_name in {
+        "index_realtime_snapshot_tdx",
+        "etf_realtime_snapshot_tdx",
+    }
+    normalize = normalize_index_snapshot_row if index_like else normalize_realtime_snapshot_row
+    result = explicit_quote_server_group_request_result(
+        tdx_codes,
+        server_options=server_options,
+        batch_size=DEFAULT_QUOTE_BATCH_SIZE,
+        create_client=create_tdx_client,
+        execute_batches=execute_server_group_batches,
+        client_meta=tdx_client_meta,
+        parallel_client_meta=tdx_parallel_client_meta,
+        quote_security_from_tdx_code=quote_security_from_tdx_code,
+        tdx_explicit_quotes=tdx_explicit_quotes,
+        as_list=as_list,
+        normalize_row=lambda quote, client: normalize(quote, client=client),
+    )
+    adapter.last_meta = dict(result.meta)
+    if interface_name == "etf_realtime_snapshot_tdx":
+        adapter.last_meta["tdx_asset_type"] = "etf"
+    return result.rows
+
+
 def request_stock_kline(
     adapter: Any,
     client: Any,
@@ -365,8 +417,7 @@ def request_stock_kline_parallel(
     from .normalize_utils import get_value
     from .options import (
         has_tdx_connection_options,
-        tdx_request_option_connections_per_server,
-        tdx_request_option_hosts,
+        tdx_server_group_options,
     )
     from .request_host_config import configured_tdx_hosts_from_options, effective_host_strings
     from .request_limits import TDX_KLINE_HOST_COUNT, TDX_KLINE_POOL_SIZE
@@ -392,8 +443,7 @@ def request_stock_kline_parallel(
         validate_anchor_date=validate_kline_anchor_date,
         parallel_options_func=kline_parallel_options,
         has_connection_options=has_tdx_connection_options,
-        option_hosts=tdx_request_option_hosts,
-        option_connections_per_server=tdx_request_option_connections_per_server,
+        server_group_options=tdx_server_group_options,
         configured_hosts=adapter._configured_hosts,
         configured_hosts_from_options=lambda options: configured_tdx_hosts_from_options(
             options,

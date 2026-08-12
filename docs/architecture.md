@@ -220,9 +220,18 @@ axdata-home/
 `axdata-source-tdx` 的 7709 传输层采用每连接槽一个 Actor 的模型。Actor
 独占 TCP socket，负责连接、发送、增量收包、心跳、重连和关闭；调用线程只
 提交同步 request ticket。`PooledSocketTransport` 以有界 FIFO 队列分配空闲
-槽位，并把排队时间计入请求超时。普通源端直取仍可使用请求级 client，批量
-采集和实时任务通过 pool size 获得并行度，不在 socket 上叠加 reader/heartbeat
-线程。
+槽位，并把排队时间计入请求超时。普通源端直取仍可使用请求级 client，不在
+socket 上叠加 reader/heartbeat 线程。
+
+Actor pool 上方另有 TDX server-group scheduler。`hosts` / `source_server_count`
+表示候选服务器和服务器数上限，`connections_per_server` 表示每台服务器独立
+pool 的 Actor/socket 上限；不能把两者乘起来塞进一个多候选 host 的 pool。超过
+一个 80-code 协议批次的实时快照会先按批次数动态缩容：实际服务器数为批次数与
+服务器上限的较小值，每台实际连接数为 `ceil(批次数 / 实际服务器数)` 与连接上限
+的较小值。建连失败时从未启用的候选服务器补位，失败批次最多换一台健康服务器
+重试一次，最后按输入代码顺序合并去重。兼容参数 `pool_size` 只描述普通单 client
+的 pool 大小。显式 server group 的配置总上限为 128 个 Actor/socket 槽位，实际
+分配量还受当次工作量限制。
 
 ## 关键设计决策
 

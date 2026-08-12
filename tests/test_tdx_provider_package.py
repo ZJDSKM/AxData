@@ -5935,6 +5935,7 @@ def test_tdx_public_runtime_modules_are_provider_owned_or_compat_only() -> None:
         "provider.py",
         "request_adapter.py",
         "request_entrypoints.py",
+        "server_group.py",
         "stats_errors.py",
         "stats_validation.py",
         "tdx_f10_catalog.py",
