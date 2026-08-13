@@ -866,7 +866,7 @@ def _normalize_stock_change_row(row: Mapping[str, Any], *, change_type: str) -> 
         "name": _clean_text(row.get("n")),
         "market_code": _clean_text(row.get("m")),
         "change_time": _format_hhmmss(row.get("tm")),
-        "change_pct": _parse_float(row.get("i")),
+        "change_pct": _parse_change_pct_i(row.get("i")),
         "change_type": change_type,
         "change_type_name": _CHANGE_TYPE_NAMES.get(change_type, change_type),
     }
@@ -1066,6 +1066,14 @@ def _parse_float(value: Any) -> float | None:
         return float(text.replace(",", ""))
     except ValueError:
         return None
+
+
+def _parse_change_pct_i(value: Any) -> float | None:
+    text = _clean_text(value)
+    if text is None:
+        return None
+    first = text.split(",")[0]
+    return _parse_float(first)
 
 
 def _parse_int(value: Any) -> int | None:
