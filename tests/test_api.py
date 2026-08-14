@@ -2307,7 +2307,7 @@ def test_downloaders_catalog_lists_stock_suspensions_and_st_tdx():
     assert historical_list["provider_id"] == "axdata.source.exchange"
     assert historical_list["manifest_downloader_name"] == "stock_historical_list_exchange.snapshot"
     assert historical_list["resource_group"] == "exchange.http"
-    assert historical_list["default_params"] == {"trade_date": "20260811"}
+    assert historical_list["default_params"] == {"trade_date": datetime.now().strftime("%Y%m%d")}
     assert historical_list["default_connection_count"] == 1
     assert historical_list["primary_key"] == ["trade_date", "instrument_id"]
 

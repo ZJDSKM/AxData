@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -505,7 +506,7 @@ def test_builtin_generic_downloader_profiles_are_registered_without_tdx(tmp_path
     assert historical_list.manifest_downloader_name == "stock_historical_list_exchange.snapshot"
     assert historical_list.downloader_type == "snapshot"
     assert historical_list.resource_group == "exchange.http"
-    assert historical_list.default_params == {"trade_date": "20260811"}
+    assert historical_list.default_params == {"trade_date": datetime.now().strftime("%Y%m%d")}
     assert historical_list.output_layer == "snapshot"
     assert historical_list.primary_key == ("trade_date", "instrument_id")
     assert historical_list.supported_formats == ["parquet", "csv", "jsonl"]
@@ -576,7 +577,7 @@ def test_builtin_generic_downloader_writes_formats_and_duckdb_can_read(monkeypat
     assert calls == [
         {
             "interface_name": "stock_historical_list_exchange",
-            "params": {"trade_date": "20260811"},
+            "params": {"trade_date": datetime.now().strftime("%Y%m%d")},
             "fields": [
                 "trade_date",
                 "instrument_id",
