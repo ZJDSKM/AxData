@@ -50,7 +50,7 @@ BUILTIN_GENERIC_COLLECTABLE_INTERFACE_NAMES = {
     "stock_basic_info_exchange",
 }
 BUILTIN_GENERIC_PROVIDER_COUNTS = {
-    "axdata.source.exchange": (4, 3, 0),  # 08-11 +stock_prbook_sse（上交所预约披露）
+    "axdata.source.exchange": (7, 3, 0),  # 08-11 +stock_prbook_sse; 08-12 +业绩快报/预约披露/业绩预告
     "axdata.source.cninfo": (32, 0, 0),
     "axdata.source.tencent": (6, 0, 0),
     "axdata.source.eastmoney": (13, 0, 0),
