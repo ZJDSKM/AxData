@@ -22,6 +22,75 @@ class QuoteRequestResult:
     meta: dict[str, Any]
 
 
+def explicit_quote_server_group_request_result(
+    tdx_codes: Sequence[str],
+    *,
+    server_options: Any,
+    batch_size: int,
+    create_client: Callable[..., Any],
+    execute_batches: Callable[..., Any],
+    client_meta: Callable[[Any], Mapping[str, Any]],
+    parallel_client_meta: Callable[
+        [Sequence[Mapping[str, Any]], Sequence[str]],
+        dict[str, Any],
+    ],
+    quote_security_from_tdx_code: Callable[[str], tuple[Any, Any]],
+    tdx_explicit_quotes: Callable[[Any, Sequence[tuple[Any, Any]]], Any],
+    as_list: Callable[[Any], list[Any]],
+    normalize_row: Callable[[Any, Any], dict[str, Any]],
+) -> QuoteRequestResult:
+    """Fetch quote batches through independent host pools and restore input order."""
+
+    batches = [
+        list(tdx_codes[index : index + batch_size])
+        for index in range(0, len(tdx_codes), batch_size)
+    ]
+
+    def request_batch(client: Any, batch: Sequence[str]) -> QuoteRowsResult:
+        return explicit_quote_rows(
+            client,
+            batch,
+            quote_security_from_tdx_code=quote_security_from_tdx_code,
+            tdx_explicit_quotes=tdx_explicit_quotes,
+            as_list=as_list,
+            normalize_row=lambda quote: normalize_row(quote, client),
+        )
+
+    result = execute_batches(
+        batches,
+        options=server_options,
+        create_client=create_client,
+        request_batch=request_batch,
+        client_meta=client_meta,
+        max_retries=1,
+    )
+    row_by_code: dict[str, dict[str, Any]] = {}
+    for batch_result in result.values:
+        for row in batch_result.rows:
+            tdx_code = str(row.get("tdx_code") or "").lower()
+            if tdx_code and tdx_code not in row_by_code:
+                row_by_code[tdx_code] = row
+    rows = [row_by_code[code.lower()] for code in tdx_codes if code.lower() in row_by_code]
+    meta = {
+        **parallel_client_meta(result.client_metas, server_options.hosts),
+        "tdx_protocol": "0x054c",
+        "tdx_requested_code_count": len(tdx_codes),
+        "tdx_quote_count": len(rows),
+        "tdx_quote_batch_count": len(batches),
+        "tdx_server_group_max_host_count": result.configured_host_count,
+        "tdx_server_group_planned_host_count": result.active_host_count,
+        "tdx_server_group_host_count": result.healthy_host_count,
+        "tdx_server_group_healthy_host_count": result.healthy_host_count,
+        "tdx_server_group_failed_hosts": result.failed_hosts,
+        "tdx_max_connections_per_server": result.max_connections_per_server,
+        "tdx_connections_per_server": result.connections_per_server,
+        "tdx_concurrency_capacity": result.concurrency_capacity,
+        "tdx_concurrency_limit": result.concurrency_limit,
+        "tdx_retry_count": result.retry_count,
+    }
+    return QuoteRequestResult(rows=rows, meta=meta)
+
+
 def order_book_request_result(
     client: Any,
     params: Mapping[str, Any],

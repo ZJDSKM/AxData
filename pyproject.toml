@@ -49,4 +49,3 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.setuptools]
 packages = []
-
