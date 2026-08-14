@@ -15,13 +15,42 @@ if TYPE_CHECKING:
     from .collector_registry import CollectorRegistration
 
 
+_REGISTRY_CACHE: dict[tuple, Any] = {}
+
+
+def invalidate_provider_registry_cache() -> None:
+    """清空进程级 registry 缓存（清单变更后调用即生效，无需重启）。"""
+    _REGISTRY_CACHE.clear()
+
+
+def _plugin_config_mtime(data_root: str | Path | None) -> float:
+    from .plugin_config import plugin_config_path
+
+    path = plugin_config_path(data_root=data_root)
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return -1.0
+
+
 def build_builtin_provider_registry(
     *,
     plugin_config: PluginConfig | None = None,
     data_root: str | Path | None = None,
     discover_entry_points: bool = True,
 ) -> ProviderRegistry:
-    """Build a registry containing the current built-in providers."""
+    """Build a registry containing the current built-in providers.
+
+    默认参数组合（热路径：每次 source 请求）走进程级缓存：每次重建会触发
+    entry_points 全量扫描 + 清单解析，产生大量无法及时回收的 metadata 对象，
+    高频调用下内存持续膨胀。缓存键含插件配置文件 mtime，配置变更（如禁用
+    provider）后自动失效重建。显式传入 plugin_config 的调用方绕开缓存。
+    """
+    if plugin_config is None:
+        cache_key = (str(data_root or ""), discover_entry_points, _plugin_config_mtime(data_root))
+        cached = _REGISTRY_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
 
     from .plugin_config import load_plugin_config
     from .provider_registry import ProviderRegistry
@@ -40,6 +69,9 @@ def build_builtin_provider_registry(
         _ensure_axdata_managed_plugin_path(data_root=data_root)
         registry.discover_entry_points()
         _register_repo_preinstalled_source_plugins(registry, config=config)
+
+    if plugin_config is None:
+        _REGISTRY_CACHE[cache_key] = registry
     return registry
 
 
