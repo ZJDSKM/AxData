@@ -105,17 +105,18 @@ def tdx_request_topic_worker_count(options: Mapping[str, Any], item_count: int) 
 
 
 def tdx_request_option_pool_size(options: Mapping[str, Any]) -> int | None:
-    """Return the total TDX request pool size from execution options."""
+    """Return the pool size for one ordinary failover client.
+
+    A request client owns one pool even when it has multiple candidate hosts.
+    Multi-host batch scheduling is resolved separately by
+    :func:`tdx_server_group_options`.
+    """
 
     if "pool_size" in options:
         return positive_option_int(options["pool_size"], "pool_size", maximum=128)
-    source_server_count = positive_option_int(options.get("source_server_count", 1), "source_server_count", maximum=64)
-    connections_per_server = positive_option_int(
-        options.get("connections_per_server", 1),
-        "connections_per_server",
-        maximum=64,
-    )
-    return max(1, min(source_server_count * connections_per_server, 128))
+    if "connections_per_server" in options:
+        return tdx_request_option_connections_per_server(options)
+    return 1
 
 
 def tdx_request_option_connections_per_server(options: Mapping[str, Any]) -> int:
@@ -139,20 +140,58 @@ def tdx_request_option_hosts(
 ) -> list[str] | None:
     """Return explicit or configured TDX request hosts from execution options."""
 
+    source_server_count = None
+    if "source_server_count" in options:
+        source_server_count = positive_option_int(
+            options.get("source_server_count"),
+            "source_server_count",
+            maximum=64,
+        )
     if "hosts" in options:
         hosts = string_values(options.get("hosts"))
         normalized = [str(host).strip() for host in hosts if str(host).strip()]
+        if source_server_count is not None:
+            normalized = normalized[:source_server_count]
         return normalized or None
-    if "source_server_count" not in options:
+    if source_server_count is None:
         return None
-    source_server_count = positive_option_int(options.get("source_server_count"), "source_server_count", maximum=64)
     return configured_hosts(options)[:source_server_count]
+
+
+def tdx_server_group_options(
+    options: Mapping[str, Any],
+    *,
+    configured_hosts: Callable[[Mapping[str, Any]], list[str]],
+) -> Any:
+    """Resolve explicit server and per-server connection upper bounds."""
+
+    from .server_group import ServerGroupOptions
+
+    explicit_hosts = tdx_request_option_hosts(options, configured_hosts=configured_hosts)
+    if explicit_hosts is not None:
+        hosts = explicit_hosts
+    else:
+        # A legacy pool_size or connections_per_server option configures one
+        # server unless the caller also supplied an explicit host topology.
+        hosts = configured_hosts(options)[:1]
+    connections_per_server = tdx_request_option_connections_per_server(options)
+    if len(hosts) * connections_per_server > 128:
+        raise SourceRequestValidationError(
+            "TDX server group capacity (server count * connections_per_server) must be <= 128."
+        )
+    return ServerGroupOptions(
+        hosts=tuple(hosts),
+        connections_per_server=connections_per_server,
+    )
 
 
 def has_tdx_connection_options(options: Mapping[str, Any]) -> bool:
     """Return whether execution options explicitly configure TDX connections."""
 
-    return any(key in options for key in ("hosts", "pool_size", "source_server_count", "connections_per_server"))
+    return any(
+        key in options
+        for key in ("hosts", "pool_size", "source_server_count", "connections_per_server")
+    )
 
 
 def string_values(value: Any) -> list[str]:

@@ -43,24 +43,31 @@ def kline_parallel_options(
     options: Any,
     *,
     has_connection_options: Callable[[Any], bool],
-    option_hosts: Callable[..., list[str] | None],
-    option_connections_per_server: Callable[[Any], int],
+    server_group_options: Callable[..., Any],
     configured_hosts: Callable[[], list[str]],
     configured_hosts_from_options: Callable[..., list[str]],
+    work_item_count: int,
     env_int: Callable[..., int],
     default_host_count: int,
     default_pool_size: int,
 ) -> KlineParallelOptions:
+    from .server_group import ServerGroupOptions, plan_server_group
+
     if has_connection_options(options):
-        hosts = option_hosts(
+        configured_group = server_group_options(
             options,
             configured_hosts=configured_hosts_from_options,
-        ) or configured_hosts()
-        pool_size = option_connections_per_server(options)
+        )
     else:
         host_count = env_int("AXDATA_TDX_KLINE_HOST_COUNT", default_host_count, minimum=1)
         pool_size = env_int("AXDATA_TDX_KLINE_POOL_SIZE", default_pool_size, minimum=1)
-        hosts = list(configured_hosts()[:host_count])
+        configured_group = ServerGroupOptions(
+            hosts=tuple(configured_hosts()[:host_count]),
+            connections_per_server=pool_size,
+        )
+    group = plan_server_group(configured_group, work_item_count)
+    hosts = list(group.hosts)
+    pool_size = group.connections_per_server
     return KlineParallelOptions(hosts=list(hosts), pool_size=pool_size)
 
 

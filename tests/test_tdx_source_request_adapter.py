@@ -2400,6 +2400,70 @@ def test_tdx_adapter_requests_index_realtime_snapshot_without_stock_only_fields(
     assert adapter.last_meta["tdx_protocol"] == "0x054c"
 
 
+def test_tdx_adapter_shards_large_snapshot_across_independent_server_pools(monkeypatch):
+    from axdata_source_tdx import client_factory
+
+    created_clients = []
+
+    class SnapshotGroupClient(FakeTdxClient):
+        def __init__(self, host, pool_size):
+            super().__init__()
+            self.host = host
+            self.closed = False
+            self.transport = SimpleNamespace(
+                hosts=(host,),
+                connected_host=host,
+                connected_hosts=tuple(f"{host}#{index}" for index in range(pool_size)),
+                pool_size=pool_size,
+                heartbeat_interval=None,
+            )
+
+        def close(self):
+            self.closed = True
+
+    def fake_create_tdx_client(*, hosts=None, pool_size=None, heartbeat_interval=None):
+        assert heartbeat_interval is None
+        client = SnapshotGroupClient(hosts[0], pool_size)
+        created_clients.append(client)
+        return client
+
+    monkeypatch.setattr(client_factory, "create_tdx_client", fake_create_tdx_client)
+    codes = [f"{index:06d}.SZ" for index in range(1, 162)]
+    hosts = [f"10.0.0.{index}:7709" for index in range(1, 11)]
+    adapter = TdxRequestAdapter(options={"hosts": hosts, "connections_per_server": 8})
+
+    rows = adapter.request("stock_realtime_snapshot_tdx", {"code": codes})
+
+    assert len(created_clients) == 3
+    assert [client.transport.pool_size for client in created_clients] == [1] * 3
+    assert [row["instrument_id"] for row in rows] == codes
+    assert sum(len(client.explicit_quote_calls) for client in created_clients) == 3
+    assert all(client.closed for client in created_clients)
+    assert adapter.last_meta["tdx_server_group_max_host_count"] == 10
+    assert adapter.last_meta["tdx_server_group_planned_host_count"] == 3
+    assert adapter.last_meta["tdx_server_group_host_count"] == 3
+    assert adapter.last_meta["tdx_server_group_healthy_host_count"] == 3
+    assert adapter.last_meta["tdx_max_connections_per_server"] == 8
+    assert adapter.last_meta["tdx_connections_per_server"] == 1
+    assert adapter.last_meta["tdx_concurrency_capacity"] == 3
+    assert adapter.last_meta["tdx_concurrency_limit"] == 3
+    assert adapter.last_meta["tdx_quote_batch_count"] == 3
+
+
+def test_tdx_adapter_keeps_injected_client_for_large_snapshot() -> None:
+    client = FakeTdxClient()
+    codes = [f"{index:06d}.SZ" for index in range(1, 82)]
+    adapter = TdxRequestAdapter(
+        client=client,
+        options={"source_server_count": 10, "connections_per_server": 8},
+    )
+
+    rows = adapter.request("stock_realtime_snapshot_tdx", {"code": codes})
+
+    assert [row["instrument_id"] for row in rows] == codes
+    assert len(client.explicit_quote_calls) == 1
+
+
 def test_tdx_realtime_refresh_rows_uses_0547_and_snapshot_field_shape():
     client = FakeTdxClient()
 
@@ -5515,6 +5579,22 @@ def test_tdx_stats_resource_reuses_parsed_resource_in_process(tmp_path):
     assert second is first
 
 
+def _expected_default_tdx_stats_cache_root(local_app_data: Path) -> Path:
+    """Expected default TDX stats cache root for the current OS.
+
+    Mirrors ``axdata_source_tdx.stats_cache.user_tdx_stats_cache_root`` so the
+    assertion matches the running platform instead of assuming the Windows
+    ``LOCALAPPDATA`` layout.
+    """
+
+    if os.name == "nt":
+        return (local_app_data / "AxData" / "cache" / "tdx" / "stats").resolve()
+    if sys.platform == "darwin":
+        return (Path.home() / "Library" / "Caches" / "AxData" / "tdx" / "stats").resolve()
+    base = Path(os.getenv("XDG_CACHE_HOME") or (Path.home() / ".cache"))
+    return (base / "axdata" / "tdx" / "stats").resolve()
+
+
 def test_tdx_direct_adapter_default_stats_cache_is_independent_of_cwd(monkeypatch, tmp_path):
     from axdata_source_tdx.stats_cache import default_tdx_stats_cache_root
 
@@ -5532,7 +5612,7 @@ def test_tdx_direct_adapter_default_stats_cache_is_independent_of_cwd(monkeypatc
     second = default_tdx_stats_cache_root()
 
     assert first == second
-    assert first == (local_app_data / "AxData" / "cache" / "tdx" / "stats").resolve()
+    assert first == _expected_default_tdx_stats_cache_root(local_app_data)
 
 
 def test_tdx_adapter_refreshes_stats_cache_older_than_previous_trade_date(monkeypatch, tmp_path):
@@ -9618,4 +9698,3 @@ def test_tdx_etf_auction_result():
     adapter = TdxRequestAdapter()
     result = adapter.request("etf_auction_result_tdx", {"code": "510050.SH"})
     assert isinstance(result, list)
-
